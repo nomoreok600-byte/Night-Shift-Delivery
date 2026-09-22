@@ -1,7 +1,8 @@
 // ============================================
-// NIGHT SHIFT DELIVERY - CORE ENGINE (STEP 3)
-// Canvas setup, game loop, player movement, walls,
-// streetlight raycasting/shadows, exposure meter
+// NIGHT SHIFT DELIVERY - FULL CORE ENGINE
+// Touch movement, walls, dynamic lighting/shadows,
+// drone AI (patrol/suspicious/alert), exposure meter,
+// win/loss states, delivery zone
 // ============================================
 
 // --- CANVAS SETUP ---
@@ -13,6 +14,8 @@ function resizeCanvas() {
     canvas.height = window.innerHeight;
     generateWalls();
     generateLights();
+    generateDrones();
+    generateDeliveryZone();
 }
 window.addEventListener('resize', resizeCanvas);
 
@@ -20,6 +23,8 @@ window.addEventListener('resize', resizeCanvas);
 const player = {
     x: 0,
     y: 0,
+    startX: 0,
+    startY: 0,
     radius: 20,
     speed: 4,
     color: '#3399ff',
@@ -53,11 +58,16 @@ function generateWalls() {
             y: canvas.height * 0.65,
             w: canvas.width * 0.20,
             h: canvas.height * 0.20
+        },
+        {
+            x: canvas.width * 0.65,
+            y: canvas.height * 0.75,
+            w: canvas.width * 0.20,
+            h: canvas.height * 0.12
         }
     ];
 }
 
-// Returns the 4 corner points of a wall rectangle
 function getWallCorners(wall) {
     return [
         { x: wall.x, y: wall.y },
@@ -67,7 +77,6 @@ function getWallCorners(wall) {
     ];
 }
 
-// Returns the 4 edges (as {a, b} point pairs) of a wall rectangle
 function getWallEdges(wall) {
     const c = getWallCorners(wall);
     return [
@@ -79,30 +88,40 @@ function getWallEdges(wall) {
 }
 
 // ============================================
-// STREETLIGHT / LIGHTING SYSTEM
+// LIGHTING SYSTEM
 // ============================================
 
-let streetlight = {};
+let lights = [];
 
-// Positions the streetlight proportionally near the second wall
 function generateLights() {
-    streetlight = {
-        x: canvas.width * 0.62,
-        y: canvas.height * 0.30,
-        radius: Math.max(canvas.width, canvas.height) * 0.30,
-        color: 'rgba(255, 230, 120, 0.9)'
-    };
+    lights = [
+        {
+            x: canvas.width * 0.62,
+            y: canvas.height * 0.30,
+            radius: Math.max(canvas.width, canvas.height) * 0.28,
+            color: 'rgba(255, 230, 120, 0.9)'
+        },
+        {
+            x: canvas.width * 0.25,
+            y: canvas.height * 0.55,
+            radius: Math.max(canvas.width, canvas.height) * 0.25,
+            color: 'rgba(255, 230, 120, 0.9)'
+        },
+        {
+            x: canvas.width * 0.78,
+            y: canvas.height * 0.80,
+            radius: Math.max(canvas.width, canvas.height) * 0.22,
+            color: 'rgba(255, 230, 120, 0.9)'
+        }
+    ];
 }
 
-// Ray-vs-segment intersection.
-// Ray: O + t*D (t >= 0), Segment: A -> B (u in [0,1])
-// Returns distance t along the ray if intersecting, otherwise null.
 function raySegmentIntersect(ox, oy, dx, dy, ax, ay, bx, by) {
     const ex = bx - ax;
     const ey = by - ay;
     const denom = dx * ey - dy * ex;
 
-    if (Math.abs(denom) < 1e-10) return null; // parallel, no intersection
+    if (Math.abs(denom) < 1e-10) return null;
 
     const t = ((ax - ox) * ey - (ay - oy) * ex) / denom;
     const u = ((ax - ox) * dy - (ay - oy) * dx) / denom;
@@ -113,8 +132,6 @@ function raySegmentIntersect(ox, oy, dx, dy, ax, ay, bx, by) {
     return null;
 }
 
-// Casts a single ray from the light in direction (dx, dy),
-// returns the closest hit point (either a wall or the light's max radius)
 function castRayToClosest(light, dx, dy, wallList) {
     let minT = light.radius;
 
@@ -135,9 +152,6 @@ function castRayToClosest(light, dx, dy, wallList) {
     };
 }
 
-// Builds a visibility polygon for a light source, accounting for wall occlusion.
-// Casts rays toward every wall corner (with tiny angle offsets to catch edges),
-// sorts them by angle, then connects the resulting hit points into a polygon.
 function computeLightPolygon(light, wallList) {
     const EPS = 0.00005;
     let angles = [];
@@ -151,8 +165,6 @@ function computeLightPolygon(light, wallList) {
         }
     }
 
-    // Also include a base ring of angles so the light still looks circular
-    // when nothing is nearby (smooths out the polygon on open ground).
     const RING_STEPS = 32;
     for (let i = 0; i < RING_STEPS; i++) {
         angles.push((i / RING_STEPS) * Math.PI * 2);
@@ -170,9 +182,7 @@ function computeLightPolygon(light, wallList) {
     return polygon;
 }
 
-// Determines whether the player currently stands inside the lit area
-// (within light radius AND not blocked by a wall).
-function isPlayerLit(light, target, wallList) {
+function isTargetLit(light, target, wallList) {
     const dx = target.x - light.x;
     const dy = target.y - light.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -195,22 +205,31 @@ function isPlayerLit(light, target, wallList) {
         }
     }
 
-    // If a wall intersects the ray before reaching the player, they're shadowed
     if (closestWallT < dist - 1) return false;
 
     return true;
+}
+
+function isPlayerInAnyLight() {
+    for (let i = 0; i < lights.length; i++) {
+        if (isTargetLit(lights[i], player, walls)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // ============================================
 // EXPOSURE METER
 // ============================================
 
-let exposure = 0; // 0 - 100
-const EXPOSURE_FILL_RATE = 0.6;
-const EXPOSURE_DRAIN_RATE = 0.4;
+let exposure = 0;
+const EXPOSURE_FILL_RATE = 0.5;
+const EXPOSURE_DRAIN_RATE = 0.35;
+const EXPOSURE_ALERT_THRESHOLD = 75;
 
 function updateExposure() {
-    const lit = isPlayerLit(streetlight, player, walls);
+    const lit = isPlayerInAnyLight();
 
     if (lit) {
         exposure += EXPOSURE_FILL_RATE;
@@ -219,6 +238,10 @@ function updateExposure() {
     }
 
     exposure = Math.max(0, Math.min(100, exposure));
+
+    if (exposure >= 100) {
+        triggerGameOver();
+    }
 }
 
 function drawExposureMeter() {
@@ -227,11 +250,9 @@ function drawExposureMeter() {
     const barX = (canvas.width - barWidth) / 2;
     const barY = 24;
 
-    // Background track
     ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
     ctx.fillRect(barX, barY, barWidth, barHeight);
 
-    // Fill color shifts White -> Yellow -> Red as exposure rises
     let fillColor;
     if (exposure < 50) {
         fillColor = '#f5f5f5';
@@ -245,25 +266,293 @@ function drawExposureMeter() {
     ctx.fillStyle = fillColor;
     ctx.fillRect(barX, barY, fillWidth, barHeight);
 
-    // Border
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
     ctx.lineWidth = 2;
     ctx.strokeRect(barX, barY, barWidth, barHeight);
 
-    // Label
     ctx.fillStyle = '#ffffff';
     ctx.font = '12px monospace';
     ctx.fillText('EXPOSURE', barX, barY - 6);
 }
 
-// --- INITIAL SETUP (after functions are defined) ---
+// ============================================
+// DELIVERY ZONE (WIN CONDITION)
+// ============================================
+
+let deliveryZone = {};
+
+function generateDeliveryZone() {
+    deliveryZone = {
+        x: canvas.width * 0.75,
+        y: canvas.height * 0.10,
+        w: canvas.width * 0.18,
+        h: canvas.height * 0.12
+    };
+}
+
+function checkDeliveryZone() {
+    const closestX = Math.max(deliveryZone.x, Math.min(player.x, deliveryZone.x + deliveryZone.w));
+    const closestY = Math.max(deliveryZone.y, Math.min(player.y, deliveryZone.y + deliveryZone.h));
+
+    const dx = player.x - closestX;
+    const dy = player.y - closestY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < player.radius) {
+        triggerDeliverySuccess();
+    }
+}
+
+function drawDeliveryZone() {
+    ctx.fillStyle = 'rgba(50, 255, 120, 0.25)';
+    ctx.fillRect(deliveryZone.x, deliveryZone.y, deliveryZone.w, deliveryZone.h);
+
+    ctx.strokeStyle = '#32ff78';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#32ff78';
+    ctx.shadowBlur = 12;
+    ctx.strokeRect(deliveryZone.x, deliveryZone.y, deliveryZone.w, deliveryZone.h);
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#32ff78';
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('DELIVERY', deliveryZone.x + deliveryZone.w / 2, deliveryZone.y + deliveryZone.h / 2 - 4);
+    ctx.fillText('ZONE', deliveryZone.x + deliveryZone.w / 2, deliveryZone.y + deliveryZone.h / 2 + 12);
+    ctx.textAlign = 'left';
+}
+
+// ============================================
+// DRONE AI (STATE MACHINE)
+// ============================================
+
+let drones = [];
+
+function generateDrones() {
+    drones = [
+        {
+            x: canvas.width * 0.35,
+            y: canvas.height * 0.35,
+            size: 16,
+            speed: 1.5,
+            angle: 0,
+            visionRange: 180,
+            visionAngle: 45,
+            state: 'patrol',
+            patrolNodes: [
+                { x: canvas.width * 0.35, y: canvas.height * 0.35 },
+                { x: canvas.width * 0.50, y: canvas.height * 0.28 },
+                { x: canvas.width * 0.42, y: canvas.height * 0.45 }
+            ],
+            currentNode: 0,
+            suspicionTimer: 0,
+            sweepDirection: 1,
+            alertSpeed: 2.8
+        },
+        {
+            x: canvas.width * 0.70,
+            y: canvas.height * 0.60,
+            size: 16,
+            speed: 1.3,
+            angle: 180,
+            visionRange: 170,
+            visionAngle: 45,
+            state: 'patrol',
+            patrolNodes: [
+                { x: canvas.width * 0.70, y: canvas.height * 0.60 },
+                { x: canvas.width * 0.50, y: canvas.height * 0.65 },
+                { x: canvas.width * 0.75, y: canvas.height * 0.75 }
+            ],
+            currentNode: 0,
+            suspicionTimer: 0,
+            sweepDirection: 1,
+            alertSpeed: 2.5
+        }
+    ];
+}
+
+function isPlayerInVisionCone(drone) {
+    const dx = player.x - drone.x;
+    const dy = player.y - drone.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > drone.visionRange) return false;
+
+    const angleToPlayer = Math.atan2(dy, dx) * (180 / Math.PI);
+    let angleDiff = angleToPlayer - drone.angle;
+
+    while (angleDiff > 180) angleDiff -= 360;
+    while (angleDiff < -180) angleDiff += 360;
+
+    if (Math.abs(angleDiff) > drone.visionAngle) return false;
+
+    const ndx = dx / dist;
+    const ndy = dy / dist;
+
+    let closestWallT = Infinity;
+    for (let i = 0; i < walls.length; i++) {
+        const edges = getWallEdges(walls[i]);
+        for (let j = 0; j < edges.length; j++) {
+            const e = edges[j];
+            const t = raySegmentIntersect(drone.x, drone.y, ndx, ndy, e.a.x, e.a.y, e.b.x, e.b.y);
+            if (t !== null && t < closestWallT) {
+                closestWallT = t;
+            }
+        }
+    }
+
+    if (closestWallT < dist - 1) return false;
+
+    return true;
+}
+
+function updateDrone(drone) {
+    if (exposure >= EXPOSURE_ALERT_THRESHOLD && drone.state !== 'alert') {
+        drone.state = 'alert';
+    }
+
+    if (isPlayerInVisionCone(drone) && drone.state !== 'alert') {
+        drone.state = 'alert';
+    }
+
+    if (drone.state === 'patrol') {
+        const target = drone.patrolNodes[drone.currentNode];
+        const dx = target.x - drone.x;
+        const dy = target.y - drone.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < 5) {
+            drone.currentNode = (drone.currentNode + 1) % drone.patrolNodes.length;
+        } else {
+            drone.x += (dx / dist) * drone.speed;
+            drone.y += (dy / dist) * drone.speed;
+            drone.angle = Math.atan2(dy, dx) * (180 / Math.PI);
+        }
+
+    } else if (drone.state === 'suspicious') {
+        drone.suspicionTimer++;
+
+        drone.angle += drone.sweepDirection * 2;
+
+        if (drone.suspicionTimer > 90) {
+            drone.sweepDirection *= -1;
+            drone.suspicionTimer = 0;
+        }
+
+        if (isPlayerInVisionCone(drone)) {
+            drone.state = 'alert';
+        }
+
+        if (Math.random() < 0.01) {
+            drone.state = 'patrol';
+            drone.suspicionTimer = 0;
+        }
+
+    } else if (drone.state === 'alert') {
+        const dx = player.x - drone.x;
+        const dy = player.y - drone.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > 0) {
+            drone.x += (dx / dist) * drone.alertSpeed;
+            drone.y += (dy / dist) * drone.alertSpeed;
+            drone.angle = Math.atan2(dy, dx) * (180 / Math.PI);
+        }
+
+        if (dist < player.radius + drone.size) {
+            triggerGameOver();
+        }
+    }
+}
+
+function drawDrone(drone) {
+    ctx.save();
+    ctx.translate(drone.x, drone.y);
+    ctx.rotate((drone.angle * Math.PI) / 180);
+
+    const angleRad = (drone.visionAngle * Math.PI) / 180;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, drone.visionRange, -angleRad, angleRad);
+    ctx.closePath();
+
+    if (drone.state === 'alert') {
+        ctx.fillStyle = 'rgba(255, 50, 50, 0.25)';
+    } else if (drone.state === 'suspicious') {
+        ctx.fillStyle = 'rgba(255, 200, 50, 0.2)';
+    } else {
+        ctx.fillStyle = 'rgba(255, 230, 80, 0.15)';
+    }
+    ctx.fill();
+
+    ctx.strokeStyle = drone.state === 'alert' ? '#ff3232' : '#ffe050';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(drone.size, 0);
+    ctx.lineTo(-drone.size / 2, -drone.size);
+    ctx.lineTo(-drone.size / 2, drone.size);
+    ctx.closePath();
+
+    if (drone.state === 'alert') {
+        ctx.fillStyle = '#ff3232';
+        ctx.shadowColor = '#ff3232';
+        ctx.shadowBlur = 15;
+    } else if (drone.state === 'suspicious') {
+        ctx.fillStyle = '#ffaa33';
+    } else {
+        ctx.fillStyle = '#dd4444';
+    }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.restore();
+}
+
+// ============================================
+// WIN / LOSS HANDLERS
+// ============================================
+
+function triggerDeliverySuccess() {
+    alert('Delivery Successful! Payment received.');
+    resetLevel();
+}
+
+function triggerGameOver() {
+    alert('Busted! Game Over.');
+    resetLevel();
+}
+
+function resetLevel() {
+    player.x = player.startX;
+    player.y = player.startY;
+    player.targetX = player.x;
+    player.targetY = player.y;
+    exposure = 0;
+
+    for (let i = 0; i < drones.length; i++) {
+        drones[i].x = drones[i].patrolNodes[0].x;
+        drones[i].y = drones[i].patrolNodes[0].y;
+        drones[i].currentNode = 0;
+        drones[i].state = 'patrol';
+        drones[i].suspicionTimer = 0;
+        drones[i].angle = 0;
+    }
+}
+
+// --- INITIAL SETUP ---
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 generateWalls();
 generateLights();
+generateDrones();
+generateDeliveryZone();
 
-player.x = canvas.width / 2;
-player.y = canvas.height / 2;
+player.startX = canvas.width * 0.15;
+player.startY = canvas.height * 0.10;
+player.x = player.startX;
+player.y = player.startY;
 player.targetX = player.x;
 player.targetY = player.y;
 
@@ -358,6 +647,11 @@ function update() {
 
     handleWallCollisions();
     updateExposure();
+    checkDeliveryZone();
+
+    for (let i = 0; i < drones.length; i++) {
+        updateDrone(drones[i]);
+    }
 }
 
 // ============================================
@@ -370,7 +664,6 @@ function drawLight(light, wallList) {
 
     ctx.save();
 
-    // Clip drawing to the visibility polygon so light can't bleed past walls
     ctx.beginPath();
     ctx.moveTo(polygon[0].x, polygon[0].y);
     for (let i = 1; i < polygon.length; i++) {
@@ -379,7 +672,6 @@ function drawLight(light, wallList) {
     ctx.closePath();
     ctx.clip();
 
-    // Radial gradient glow, bright at the source, fading toward the edge
     const gradient = ctx.createRadialGradient(
         light.x, light.y, 0,
         light.x, light.y, light.radius
@@ -398,7 +690,6 @@ function drawLight(light, wallList) {
 
     ctx.restore();
 
-    // Draw the lamp fixture itself as a small glowing dot
     ctx.beginPath();
     ctx.arc(light.x, light.y, 6, 0, Math.PI * 2);
     ctx.fillStyle = '#fff6c8';
@@ -426,24 +717,26 @@ function drawWalls() {
 }
 
 function render() {
-    // Base night-black background (acts as shadow/darkness by default)
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Light glow rendered first so walls/player sit visually on top of it
-    drawLight(streetlight, walls);
+    for (let i = 0; i < lights.length; i++) {
+        drawLight(lights[i], walls);
+    }
 
-    // Obstacles occlude the light and block player movement
+    drawDeliveryZone();
     drawWalls();
 
-    // Player circle - tint slightly if currently exposed for visual feedback
+    for (let i = 0; i < drones.length; i++) {
+        drawDrone(drones[i]);
+    }
+
     ctx.beginPath();
     ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
-    ctx.fillStyle = isPlayerLit(streetlight, player, walls) ? '#66ccff' : player.color;
+    ctx.fillStyle = isPlayerInAnyLight() ? '#66ccff' : player.color;
     ctx.fill();
     ctx.closePath();
 
-    // HUD drawn last, always on top
     drawExposureMeter();
 }
 
