@@ -1,7 +1,7 @@
 // ============================================
 // OPEN WORLD 3D ENGINE - GTA-STYLE THIRD-PERSON
-// Three.js, low-poly character, city buildings,
-// dual mobile touch controls (joystick + camera drag)
+// Three.js, GLTF character model with animations,
+// city buildings, dual mobile touch controls
 // ============================================
 
 console.log('Initializing Open World Engine...');
@@ -9,7 +9,7 @@ console.log('THREE.js version:', THREE.REVISION);
 
 // --- SCENE SETUP ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb); // Sky blue
+scene.background = new THREE.Color(0x87ceeb);
 scene.fog = new THREE.Fog(0x87ceeb, 50, 300);
 
 // --- PERSPECTIVE CAMERA ---
@@ -35,7 +35,6 @@ document.body.appendChild(renderer.domElement);
 
 console.log('Renderer initialized');
 
-// Handle window resize
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -80,18 +79,9 @@ console.log('Ground plane created');
 
 // --- CITY BUILDINGS ---
 const buildingColors = [
-    0xff6b6b, // Coral red
-    0x4ecdc4, // Turquoise
-    0xffe66d, // Yellow
-    0x95e1d3, // Mint
-    0xf38181, // Pink
-    0xaa96da, // Lavender
-    0xfcbad3, // Light pink
-    0xa8e6cf, // Seafoam
-    0xdcedc1, // Light green
-    0xffd3b6, // Peach
-    0xffaaa5, // Salmon
-    0xff8b94  // Rose
+    0xff6b6b, 0x4ecdc4, 0xffe66d, 0x95e1d3,
+    0xf38181, 0xaa96da, 0xfcbad3, 0xa8e6cf,
+    0xdcedc1, 0xffd3b6, 0xffaaa5, 0xff8b94
 ];
 
 function createBuilding(x, z, width, height, depth, color) {
@@ -110,111 +100,144 @@ function createBuilding(x, z, width, height, depth, color) {
     return building;
 }
 
-// Generate city blocks
 const buildings = [];
 
-// Block 1 (left side)
 buildings.push(createBuilding(-40, -40, 15, 25, 15, buildingColors[0]));
 buildings.push(createBuilding(-40, -10, 12, 30, 12, buildingColors[1]));
 buildings.push(createBuilding(-40, 20, 18, 20, 14, buildingColors[2]));
 buildings.push(createBuilding(-40, 50, 10, 35, 10, buildingColors[3]));
 
-// Block 2 (right side)
 buildings.push(createBuilding(40, -40, 20, 22, 20, buildingColors[4]));
 buildings.push(createBuilding(40, -10, 14, 28, 16, buildingColors[5]));
 buildings.push(createBuilding(40, 20, 16, 32, 12, buildingColors[6]));
 buildings.push(createBuilding(40, 50, 12, 18, 14, buildingColors[7]));
 
-// Block 3 (center forward)
 buildings.push(createBuilding(0, 60, 25, 40, 25, buildingColors[8]));
 buildings.push(createBuilding(-20, 80, 15, 24, 15, buildingColors[9]));
 buildings.push(createBuilding(20, 80, 18, 28, 18, buildingColors[10]));
 
-// Block 4 (far back)
 buildings.push(createBuilding(0, -60, 30, 35, 20, buildingColors[11]));
 
 buildings.forEach(building => scene.add(building));
 
 console.log('City buildings generated:', buildings.length);
 
-// --- PLAYER CHARACTER (LOW-POLY MALE) ---
-const player = new THREE.Group();
-
-// Torso
-const torsoGeometry = new THREE.BoxGeometry(1.2, 1.6, 0.6);
-const torsoMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x2c3e50,
-    roughness: 0.7
-});
-const torso = new THREE.Mesh(torsoGeometry, torsoMaterial);
-torso.position.y = 1.5;
-torso.castShadow = true;
-player.add(torso);
-
-// Head
-const headGeometry = new THREE.BoxGeometry(0.6, 0.6, 0.6);
-const headMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0xd4a373,
-    roughness: 0.6
-});
-const head = new THREE.Mesh(headGeometry, headMaterial);
-head.position.y = 2.6;
-head.castShadow = true;
-player.add(head);
-
-// Arms
-const armGeometry = new THREE.BoxGeometry(0.3, 1.2, 0.3);
-const armMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x34495e,
-    roughness: 0.7
-});
-
-const leftArm = new THREE.Mesh(armGeometry, armMaterial);
-leftArm.position.set(-0.75, 1.5, 0);
-leftArm.castShadow = true;
-player.add(leftArm);
-
-const rightArm = new THREE.Mesh(armGeometry, armMaterial);
-rightArm.position.set(0.75, 1.5, 0);
-rightArm.castShadow = true;
-player.add(rightArm);
-
-// Legs
-const legGeometry = new THREE.BoxGeometry(0.4, 1.2, 0.4);
-const legMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x7f8c8d,
-    roughness: 0.8
-});
-
-const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
-leftLeg.position.set(-0.3, 0.6, 0);
-leftLeg.castShadow = true;
-player.add(leftLeg);
-
-const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
-rightLeg.position.set(0.3, 0.6, 0);
-rightLeg.castShadow = true;
-player.add(rightLeg);
+// --- PLAYER CHARACTER (GLTF MODEL) ---
+let player = new THREE.Group();
+let playerModel = null;
+let mixer = null;
+let animations = {};
+let currentAction = null;
+let isPlayerLoaded = false;
 
 player.position.set(0, 0, 0);
 scene.add(player);
 
-console.log('Player character created');
+// --- ANIMATION SYSTEM ---
+function setupAnimations(gltf) {
+    mixer = new THREE.AnimationMixer(gltf.scene);
+    
+    gltf.animations.forEach((clip) => {
+        const action = mixer.clipAction(clip);
+        animations[clip.name] = action;
+        console.log('Animation loaded:', clip.name);
+    });
+
+    // Start with Idle animation if available
+    if (animations['Idle']) {
+        currentAction = animations['Idle'];
+        currentAction.play();
+        console.log('Playing Idle animation');
+    } else if (animations['idle']) {
+        currentAction = animations['idle'];
+        currentAction.play();
+        console.log('Playing idle animation');
+    } else if (gltf.animations.length > 0) {
+        // Fallback to first animation
+        currentAction = mixer.clipAction(gltf.animations[0]);
+        currentAction.play();
+        console.log('Playing first available animation:', gltf.animations[0].name);
+    }
+}
+
+function switchAnimation(toAnimationName, duration = 0.3) {
+    if (!mixer || !animations[toAnimationName]) {
+        console.warn('Animation not found:', toAnimationName);
+        return;
+    }
+
+    const toAction = animations[toAnimationName];
+
+    if (currentAction === toAction) return;
+
+    if (currentAction) {
+        currentAction.fadeOut(duration);
+    }
+
+    toAction.reset().fadeIn(duration).play();
+    currentAction = toAction;
+}
+
+// --- LOAD GLTF MODEL ---
+const loader = new THREE.GLTFLoader();
+
+console.log('Loading character model: Mainmc1.glb');
+
+loader.load(
+    'Mainmc1.glb',
+    function (gltf) {
+        console.log('GLTF model loaded successfully');
+        
+        playerModel = gltf.scene;
+        
+        // Enable shadows on all meshes
+        playerModel.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+            }
+        });
+
+        // Scale model if needed (adjust based on your model's size)
+        playerModel.scale.set(1, 1, 1);
+        
+        player.add(playerModel);
+        
+        // Setup animations
+        if (gltf.animations && gltf.animations.length > 0) {
+            console.log('Found', gltf.animations.length, 'animations in model');
+            setupAnimations(gltf);
+        } else {
+            console.warn('No animations found in GLTF model');
+        }
+        
+        isPlayerLoaded = true;
+        console.log('Player ready');
+    },
+    function (xhr) {
+        const percentComplete = (xhr.loaded / xhr.total) * 100;
+        console.log('Loading progress:', Math.round(percentComplete) + '%');
+    },
+    function (error) {
+        console.error('Error loading GLTF model:', error);
+        console.log('Make sure Mainmc1.glb is in the same directory as index.html');
+    }
+);
 
 // --- PLAYER MOVEMENT STATE ---
 const movement = {
     forward: 0,
     right: 0,
     speed: 0.15,
-    rotationSpeed: 0.05
+    isMoving: false
 };
 
 // --- CAMERA CONTROL STATE ---
 const cameraControl = {
     distance: 8,
     height: 4,
-    yaw: 0,        // Horizontal rotation around player
-    pitch: 0.3,    // Vertical angle (looking down slightly)
+    yaw: 0,
+    pitch: 0.3,
     minPitch: -0.5,
     maxPitch: 1.2,
     sensitivity: 0.003
@@ -254,6 +277,37 @@ function handleJoystickMove(touchX, touchY) {
 
     movement.right = clampedX / joystickMaxDistance;
     movement.forward = -clampedY / joystickMaxDistance;
+    
+    // Check if player is moving
+    const isNowMoving = Math.abs(movement.forward) > 0.1 || Math.abs(movement.right) > 0.1;
+    
+    if (isNowMoving !== movement.isMoving) {
+        movement.isMoving = isNowMoving;
+        
+        if (movement.isMoving) {
+            // Try multiple common naming conventions for run animation
+            if (animations['Run']) {
+                switchAnimation('Run', 0.2);
+            } else if (animations['run']) {
+                switchAnimation('run', 0.2);
+            } else if (animations['Running']) {
+                switchAnimation('Running', 0.2);
+            } else if (animations['Walk']) {
+                switchAnimation('Walk', 0.2);
+            } else if (animations['walk']) {
+                switchAnimation('walk', 0.2);
+            }
+        } else {
+            // Try multiple common naming conventions for idle animation
+            if (animations['Idle']) {
+                switchAnimation('Idle', 0.2);
+            } else if (animations['idle']) {
+                switchAnimation('idle', 0.2);
+            } else if (animations['Standing']) {
+                switchAnimation('Standing', 0.2);
+            }
+        }
+    }
 }
 
 function resetJoystick() {
@@ -261,6 +315,19 @@ function resetJoystick() {
     movement.forward = 0;
     movement.right = 0;
     joystickActive = false;
+    
+    if (movement.isMoving) {
+        movement.isMoving = false;
+        
+        // Switch back to idle
+        if (animations['Idle']) {
+            switchAnimation('Idle', 0.2);
+        } else if (animations['idle']) {
+            switchAnimation('idle', 0.2);
+        } else if (animations['Standing']) {
+            switchAnimation('Standing', 0.2);
+        }
+    }
 }
 
 joystick.addEventListener('touchstart', (e) => {
@@ -329,9 +396,10 @@ cameraControlZone.addEventListener('touchend', (e) => {
 console.log('Camera control initialized');
 
 // --- UPDATE PLAYER ---
-function updatePlayer() {
+function updatePlayer(deltaTime) {
+    if (!isPlayerLoaded) return;
+
     if (Math.abs(movement.forward) > 0.01 || Math.abs(movement.right) > 0.01) {
-        // Calculate movement direction relative to camera's yaw
         const cameraYawAngle = cameraControl.yaw;
         
         const forwardX = Math.sin(cameraYawAngle) * movement.forward;
@@ -349,26 +417,18 @@ function updatePlayer() {
         // Rotate player to face movement direction
         const moveAngle = Math.atan2(moveX, moveZ);
         player.rotation.y = moveAngle;
-        
-        // Simple walk animation (bob head and arms)
-        const time = Date.now() * 0.008;
-        head.position.y = 2.6 + Math.sin(time) * 0.05;
-        leftArm.rotation.x = Math.sin(time) * 0.3;
-        rightArm.rotation.x = Math.sin(time + Math.PI) * 0.3;
-        leftLeg.rotation.x = Math.sin(time + Math.PI) * 0.4;
-        rightLeg.rotation.x = Math.sin(time) * 0.4;
-    } else {
-        // Reset to idle pose
-        head.position.y = 2.6;
-        leftArm.rotation.x = 0;
-        rightArm.rotation.x = 0;
-        leftLeg.rotation.x = 0;
-        rightLeg.rotation.x = 0;
+    }
+
+    // Update animation mixer
+    if (mixer) {
+        mixer.update(deltaTime);
     }
 }
 
 // --- UPDATE CAMERA (THIRD-PERSON FOLLOW) ---
 function updateCamera() {
+    if (!isPlayerLoaded) return;
+
     const offsetX = Math.sin(cameraControl.yaw) * cameraControl.distance * Math.cos(cameraControl.pitch);
     const offsetY = cameraControl.height + Math.sin(cameraControl.pitch) * cameraControl.distance;
     const offsetZ = Math.cos(cameraControl.yaw) * cameraControl.distance * Math.cos(cameraControl.pitch);
@@ -379,16 +439,20 @@ function updateCamera() {
 
     camera.lookAt(
         player.position.x,
-        player.position.y + 1.5,
+        player.position.y + 2,
         player.position.z
     );
 }
 
 // --- RENDER LOOP ---
+const clock = new THREE.Clock();
+
 function animate() {
     requestAnimationFrame(animate);
     
-    updatePlayer();
+    const deltaTime = clock.getDelta();
+    
+    updatePlayer(deltaTime);
     updateCamera();
     
     renderer.render(scene, camera);
