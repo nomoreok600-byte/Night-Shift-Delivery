@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Night Shift Delivery - 3D Isometric</title>
+<title>Open World 3D - Mobile</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -32,44 +32,56 @@
         left: 0;
         width: 100%;
         height: 100%;
-        z-index: 1;
     }
 
     #joystick {
         position: fixed;
-        bottom: 60px;
-        left: 60px;
-        width: 140px;
-        height: 140px;
-        background: rgba(255, 255, 255, 0.12);
-        border: 3px solid rgba(255, 255, 255, 0.35);
+        bottom: 80px;
+        left: 80px;
+        width: 150px;
+        height: 150px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 4px solid rgba(255, 255, 255, 0.3);
         border-radius: 50%;
         z-index: 100;
+        touch-action: none;
     }
 
     #joystickStick {
         position: absolute;
-        width: 55px;
-        height: 55px;
-        background: rgba(100, 150, 255, 0.75);
-        border: 3px solid rgba(150, 200, 255, 0.95);
+        width: 60px;
+        height: 60px;
+        background: rgba(100, 150, 255, 0.7);
+        border: 3px solid rgba(150, 200, 255, 0.9);
         border-radius: 50%;
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%);
         pointer-events: none;
-        transition: none;
+    }
+
+    #cameraControl {
+        position: fixed;
+        top: 0;
+        right: 0;
+        width: 50%;
+        height: 100%;
+        z-index: 50;
+        touch-action: none;
     }
 </style>
 </head>
 <body>
 
-    <!-- Virtual Joystick -->
+    <!-- Movement Joystick (Left Side) -->
     <div id="joystick">
         <div id="joystickStick"></div>
     </div>
 
-    <!-- Three.js via CDN (MUST load before game.js) -->
+    <!-- Camera Control Zone (Right Side) -->
+    <div id="cameraControl"></div>
+
+    <!-- Three.js via CDN -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
     
     <script src="game.js"></script>
