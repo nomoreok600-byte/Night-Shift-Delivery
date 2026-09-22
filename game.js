@@ -4,142 +4,188 @@
 // platform level, touch joystick movement
 // ============================================
 
+console.log('Game initializing...');
+console.log('THREE.js version:', THREE.REVISION);
+
 // --- SCENE SETUP ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0a0f); // Dark atmospheric background
-scene.fog = new THREE.Fog(0x0a0a0f, 20, 50); // Distance fog for atmosphere
+scene.background = new THREE.Color(0x1a1a2e);
+scene.fog = new THREE.Fog(0x1a1a2e, 25, 60);
+
+console.log('Scene created');
 
 // --- ORTHOGRAPHIC CAMERA (ISOMETRIC VIEW) ---
 const aspect = window.innerWidth / window.innerHeight;
-const frustumSize = 15;
+const frustumSize = 20;
+
 const camera = new THREE.OrthographicCamera(
-    frustumSize * aspect / -2,
-    frustumSize * aspect / 2,
-    frustumSize / 2,
-    frustumSize / -2,
-    0.1,
-    1000
+    (frustumSize * aspect) / -2,  // left
+    (frustumSize * aspect) / 2,   // right
+    frustumSize / 2,              // top
+    frustumSize / -2,             // bottom
+    0.1,                          // near
+    1000                          // far
 );
 
-// Position camera for perfect isometric angle (45° horizontal, 35.264° vertical)
-camera.position.set(10, 10, 10);
+// Position for isometric view
+camera.position.set(20, 20, 20);
 camera.lookAt(0, 0, 0);
 
+console.log('Camera created at:', camera.position);
+
 // --- RENDERER ---
-const container = document.getElementById('gameContainer');
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ 
+    antialias: true,
+    alpha: false
+});
+
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-container.appendChild(renderer.domElement);
 
-// Handle window resize / rotation
+// Append renderer canvas to body
+document.body.appendChild(renderer.domElement);
+
+console.log('Renderer created and appended to body');
+
+// Handle window resize
 window.addEventListener('resize', () => {
     const aspect = window.innerWidth / window.innerHeight;
-    camera.left = frustumSize * aspect / -2;
-    camera.right = frustumSize * aspect / 2;
+    
+    camera.left = (frustumSize * aspect) / -2;
+    camera.right = (frustumSize * aspect) / 2;
     camera.top = frustumSize / 2;
     camera.bottom = frustumSize / -2;
     camera.updateProjectionMatrix();
+    
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    
+    console.log('Window resized');
 });
 
 // --- LIGHTING ---
-// Ambient light (soft global illumination)
-const ambientLight = new THREE.AmbientLight(0x404060, 0.6);
+const ambientLight = new THREE.AmbientLight(0x6688aa, 0.5);
 scene.add(ambientLight);
 
-// Directional light (sun-like, casts shadows)
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-directionalLight.position.set(10, 20, 8);
+const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+directionalLight.position.set(15, 25, 10);
 directionalLight.castShadow = true;
-directionalLight.shadow.camera.left = -20;
-directionalLight.shadow.camera.right = 20;
-directionalLight.shadow.camera.top = 20;
-directionalLight.shadow.camera.bottom = -20;
-directionalLight.shadow.camera.near = 0.1;
-directionalLight.shadow.camera.far = 50;
+
+directionalLight.shadow.camera.left = -25;
+directionalLight.shadow.camera.right = 25;
+directionalLight.shadow.camera.top = 25;
+directionalLight.shadow.camera.bottom = -25;
+directionalLight.shadow.camera.near = 0.5;
+directionalLight.shadow.camera.far = 60;
 directionalLight.shadow.mapSize.width = 2048;
 directionalLight.shadow.mapSize.height = 2048;
+directionalLight.shadow.bias = -0.0001;
+
 scene.add(directionalLight);
 
-// --- PLATFORM LEVEL (FLOATING STONE GRID) ---
-const platformGrid = new THREE.Group();
+console.log('Lights added to scene');
 
-const stoneGeometry = new THREE.BoxGeometry(1, 0.5, 1);
+// --- PLATFORM LEVEL (FLOATING STONE GRID) ---
+const platformGroup = new THREE.Group();
+
+const stoneGeometry = new THREE.BoxGeometry(1, 0.6, 1);
 const stoneMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x5a5a6e,
-    roughness: 0.8,
-    metalness: 0.2
+    color: 0x4a5568,
+    roughness: 0.85,
+    metalness: 0.15
 });
 
-// Create 10x10 grid of stone cubes
-for (let x = -5; x < 5; x++) {
-    for (let z = -5; z < 5; z++) {
+// Create 12x12 platform grid
+for (let x = -6; x <= 5; x++) {
+    for (let z = -6; z <= 5; z++) {
         const stone = new THREE.Mesh(stoneGeometry, stoneMaterial);
-        stone.position.set(x * 1.1, -0.25, z * 1.1);
+        stone.position.set(x * 1.05, -0.3, z * 1.05);
         stone.castShadow = false;
         stone.receiveShadow = true;
-        platformGrid.add(stone);
+        platformGroup.add(stone);
     }
 }
 
-scene.add(platformGrid);
+scene.add(platformGroup);
+
+console.log('Platform created with', platformGroup.children.length, 'blocks');
 
 // --- PLAYER CHARACTER (LOW-POLY MALE PROTAGONIST) ---
 const player = new THREE.Group();
 
 // Body (torso)
-const bodyGeometry = new THREE.BoxGeometry(0.6, 1.0, 0.4);
+const bodyGeometry = new THREE.BoxGeometry(0.7, 1.2, 0.5);
 const bodyMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x2a3f5f,
-    roughness: 0.7
+    color: 0x2d3e50,
+    roughness: 0.7,
+    metalness: 0.1
 });
 const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-body.position.y = 0.5;
+body.position.y = 0.9;
 body.castShadow = true;
 body.receiveShadow = true;
 player.add(body);
 
 // Head
-const headGeometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+const headGeometry = new THREE.BoxGeometry(0.45, 0.45, 0.45);
 const headMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x3d5066,
-    roughness: 0.6
+    color: 0x3a4f63,
+    roughness: 0.6,
+    metalness: 0.05
 });
 const head = new THREE.Mesh(headGeometry, headMaterial);
-head.position.y = 1.2;
+head.position.y = 1.75;
 head.castShadow = true;
 head.receiveShadow = true;
 player.add(head);
 
-// Legs (two small boxes)
-const legGeometry = new THREE.BoxGeometry(0.2, 0.6, 0.3);
+// Arms
+const armGeometry = new THREE.BoxGeometry(0.25, 0.8, 0.25);
+const armMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0x2d3e50,
+    roughness: 0.7
+});
+
+const leftArm = new THREE.Mesh(armGeometry, armMaterial);
+leftArm.position.set(-0.5, 0.9, 0);
+leftArm.castShadow = true;
+player.add(leftArm);
+
+const rightArm = new THREE.Mesh(armGeometry, armMaterial);
+rightArm.position.set(0.5, 0.9, 0);
+rightArm.castShadow = true;
+player.add(rightArm);
+
+// Legs
+const legGeometry = new THREE.BoxGeometry(0.28, 0.7, 0.28);
 const legMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x1a2a3f,
+    color: 0x1a2332,
     roughness: 0.8
 });
 
 const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
-leftLeg.position.set(-0.15, 0.0, 0);
+leftLeg.position.set(-0.18, 0.15, 0);
 leftLeg.castShadow = true;
 player.add(leftLeg);
 
 const rightLeg = new THREE.Mesh(legGeometry, legMaterial);
-rightLeg.position.set(0.15, 0.0, 0);
+rightLeg.position.set(0.18, 0.15, 0);
 rightLeg.castShadow = true;
 player.add(rightLeg);
 
-// Start position
-player.position.set(0, 0.6, 0);
+// Position player on platform
+player.position.set(0, 0.3, 0);
 scene.add(player);
+
+console.log('Player character created and added to scene');
 
 // --- PLAYER MOVEMENT STATE ---
 const movement = {
-    forward: 0,  // -1 to 1 (Z axis)
-    right: 0,    // -1 to 1 (X axis)
-    speed: 0.08
+    forward: 0,
+    right: 0,
+    speed: 0.12
 };
 
 // --- VIRTUAL JOYSTICK ---
@@ -148,7 +194,7 @@ const joystickStick = document.getElementById('joystickStick');
 
 let joystickActive = false;
 let joystickCenter = { x: 0, y: 0 };
-const joystickMaxDistance = 35;
+const joystickMaxDistance = 42;
 
 function updateJoystickCenter() {
     const rect = joystick.getBoundingClientRect();
@@ -172,13 +218,10 @@ function handleJoystickMove(touchX, touchY) {
         clampedY = (dy / distance) * joystickMaxDistance;
     }
 
-    // Update visual stick position
     joystickStick.style.transform = `translate(calc(-50% + ${clampedX}px), calc(-50% + ${clampedY}px))`;
 
-    // Map to movement input (isometric axes)
-    // In isometric view, screen up/down controls Z, left/right controls X
     movement.right = clampedX / joystickMaxDistance;
-    movement.forward = -clampedY / joystickMaxDistance; // Negative because screen Y is inverted
+    movement.forward = -clampedY / joystickMaxDistance;
 }
 
 function resetJoystick() {
@@ -209,45 +252,65 @@ joystick.addEventListener('touchend', (e) => {
     resetJoystick();
 }, { passive: false });
 
+console.log('Joystick initialized');
+
+// --- CAMERA FOLLOW ---
+let cameraOffsetX = 20;
+let cameraOffsetY = 20;
+let cameraOffsetZ = 20;
+
 // --- UPDATE LOOP ---
 function updatePlayer() {
-    // Move player based on joystick input
+    // Move player
     player.position.x += movement.right * movement.speed;
     player.position.z += movement.forward * movement.speed;
 
-    // Keep player within platform bounds
-    player.position.x = Math.max(-4.5, Math.min(4.5, player.position.x));
-    player.position.z = Math.max(-4.5, Math.min(4.5, player.position.z));
+    // Constrain to platform
+    player.position.x = Math.max(-5.5, Math.min(5.5, player.position.x));
+    player.position.z = Math.max(-5.5, Math.min(5.5, player.position.z));
 
-    // Rotate player to face movement direction (if moving)
-    if (Math.abs(movement.forward) > 0.1 || Math.abs(movement.right) > 0.1) {
+    // Rotate player toward movement direction
+    if (Math.abs(movement.forward) > 0.05 || Math.abs(movement.right) > 0.05) {
         const targetAngle = Math.atan2(movement.right, movement.forward);
         player.rotation.y = targetAngle;
     }
 
-    // Simple idle animation (head bob)
-    head.position.y = 1.2 + Math.sin(Date.now() * 0.003) * 0.05;
+    // Subtle head bob animation
+    const time = Date.now() * 0.002;
+    head.position.y = 1.75 + Math.sin(time) * 0.04;
 }
 
 function updateCamera() {
-    // Camera follows player with smooth offset
-    const targetX = player.position.x + 10;
-    const targetZ = player.position.z + 10;
+    // Smooth camera follow
+    const targetX = player.position.x + cameraOffsetX;
+    const targetY = cameraOffsetY;
+    const targetZ = player.position.z + cameraOffsetZ;
     
-    camera.position.x += (targetX - camera.position.x) * 0.05;
-    camera.position.z += (targetZ - camera.position.z) * 0.05;
+    camera.position.x += (targetX - camera.position.x) * 0.08;
+    camera.position.y += (targetY - camera.position.y) * 0.08;
+    camera.position.z += (targetZ - camera.position.z) * 0.08;
     
     camera.lookAt(player.position.x, 0, player.position.z);
 }
 
 // --- RENDER LOOP ---
+let frameCount = 0;
+
 function animate() {
     requestAnimationFrame(animate);
+    
+    frameCount++;
     
     updatePlayer();
     updateCamera();
     
     renderer.render(scene, camera);
+    
+    // Log first few frames to confirm render loop is running
+    if (frameCount < 5) {
+        console.log('Frame', frameCount, 'rendered');
+    }
 }
 
+console.log('Starting animation loop...');
 animate();
