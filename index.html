@@ -21,55 +21,56 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background: #0a0a0f;
+        background: #000;
         touch-action: none;
     }
 
-    #gameContainer {
-        width: 100%;
-        height: 100%;
+    canvas {
+        display: block;
         position: fixed;
         top: 0;
         left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
     }
 
     #joystick {
         position: fixed;
-        bottom: 80px;
-        left: 80px;
-        width: 120px;
-        height: 120px;
-        background: rgba(255, 255, 255, 0.1);
-        border: 3px solid rgba(255, 255, 255, 0.3);
+        bottom: 60px;
+        left: 60px;
+        width: 140px;
+        height: 140px;
+        background: rgba(255, 255, 255, 0.12);
+        border: 3px solid rgba(255, 255, 255, 0.35);
         border-radius: 50%;
         z-index: 100;
     }
 
     #joystickStick {
         position: absolute;
-        width: 50px;
-        height: 50px;
-        background: rgba(100, 150, 255, 0.7);
-        border: 2px solid rgba(150, 200, 255, 0.9);
+        width: 55px;
+        height: 55px;
+        background: rgba(100, 150, 255, 0.75);
+        border: 3px solid rgba(150, 200, 255, 0.95);
         border-radius: 50%;
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%);
         pointer-events: none;
+        transition: none;
     }
 </style>
 </head>
 <body>
 
-    <div id="gameContainer"></div>
-    
     <!-- Virtual Joystick -->
     <div id="joystick">
         <div id="joystickStick"></div>
     </div>
 
-    <!-- Three.js via CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Three.js via CDN (MUST load before game.js) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
     
     <script src="game.js"></script>
 </body>
