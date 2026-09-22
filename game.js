@@ -1,462 +1,175 @@
-// ============================================
-// OPEN WORLD 3D ENGINE - GTA-STYLE THIRD-PERSON
-// Three.js, GLTF character model with animations,
-// city buildings, dual mobile touch controls
-// ============================================
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Open World 3D - Mobile</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+    }
 
-console.log('Initializing Open World Engine...');
-console.log('THREE.js version:', THREE.REVISION);
+    html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+        touch-action: none;
+    }
 
-// --- SCENE SETUP ---
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb);
-scene.fog = new THREE.Fog(0x87ceeb, 50, 300);
+    canvas {
+        display: block;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+    }
 
-// --- PERSPECTIVE CAMERA ---
-const camera = new THREE.PerspectiveCamera(
-    60,
-    window.innerWidth / window.innerHeight,
-    0.1,
-    1000
-);
+    #joystick {
+        position: fixed;
+        bottom: 80px;
+        left: 80px;
+        width: 150px;
+        height: 150px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 4px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        z-index: 100;
+        touch-action: none;
+    }
 
-// --- RENDERER ---
-const renderer = new THREE.WebGLRenderer({ 
-    antialias: true,
-    alpha: false
-});
+    #joystickStick {
+        position: absolute;
+        width: 60px;
+        height: 60px;
+        background: rgba(100, 150, 255, 0.7);
+        border: 3px solid rgba(150, 200, 255, 0.9);
+        border-radius: 50%;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+    }
 
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    #cameraControl {
+        position: fixed;
+        top: 0;
+        right: 0;
+        width: 50%;
+        height: 100%;
+        z-index: 50;
+        touch-action: none;
+    }
 
-document.body.appendChild(renderer.domElement);
+    /* Action Buttons Container */
+    #actionButtons {
+        position: fixed;
+        bottom: 60px;
+        right: 60px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-gap: 15px;
+        z-index: 100;
+    }
 
-console.log('Renderer initialized');
+    .actionButton {
+        width: 70px;
+        height: 70px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.15);
+        border: 3px solid rgba(255, 255, 255, 0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, system-ui, sans-serif;
+        font-size: 12px;
+        font-weight: bold;
+        color: #fff;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        touch-action: none;
+        transition: all 0.1s ease;
+    }
 
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
+    .actionButton:active,
+    .actionButton.active {
+        background: rgba(100, 150, 255, 0.5);
+        border-color: rgba(150, 200, 255, 0.8);
+        transform: scale(0.95);
+    }
 
-// --- LIGHTING ---
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-scene.add(ambientLight);
+    #btnRun {
+        background: rgba(100, 255, 150, 0.15);
+        border-color: rgba(100, 255, 150, 0.4);
+    }
 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-directionalLight.position.set(50, 100, 50);
-directionalLight.castShadow = true;
+    #btnRun:active,
+    #btnRun.active {
+        background: rgba(100, 255, 150, 0.5);
+        border-color: rgba(150, 255, 200, 0.8);
+    }
 
-directionalLight.shadow.camera.left = -100;
-directionalLight.shadow.camera.right = 100;
-directionalLight.shadow.camera.top = 100;
-directionalLight.shadow.camera.bottom = -100;
-directionalLight.shadow.camera.near = 0.5;
-directionalLight.shadow.camera.far = 200;
-directionalLight.shadow.mapSize.width = 2048;
-directionalLight.shadow.mapSize.height = 2048;
+    #btnJump {
+        background: rgba(255, 200, 100, 0.15);
+        border-color: rgba(255, 200, 100, 0.4);
+    }
 
-scene.add(directionalLight);
+    #btnJump:active {
+        background: rgba(255, 200, 100, 0.5);
+        border-color: rgba(255, 220, 150, 0.8);
+    }
 
-console.log('Lighting setup complete');
+    #btnFire {
+        background: rgba(255, 100, 100, 0.15);
+        border-color: rgba(255, 100, 100, 0.4);
+    }
 
-// --- GROUND PLANE (ASPHALT) ---
-const groundGeometry = new THREE.PlaneGeometry(500, 500);
-const groundMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x3a3a3a,
-    roughness: 0.9,
-    metalness: 0.1
-});
+    #btnFire:active {
+        background: rgba(255, 100, 100, 0.5);
+        border-color: rgba(255, 150, 150, 0.8);
+    }
 
-const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
+    #btnReload {
+        background: rgba(200, 150, 255, 0.15);
+        border-color: rgba(200, 150, 255, 0.4);
+    }
 
-console.log('Ground plane created');
+    #btnReload:active {
+        background: rgba(200, 150, 255, 0.5);
+        border-color: rgba(220, 180, 255, 0.8);
+    }
+</style>
+</head>
+<body>
 
-// --- CITY BUILDINGS ---
-const buildingColors = [
-    0xff6b6b, 0x4ecdc4, 0xffe66d, 0x95e1d3,
-    0xf38181, 0xaa96da, 0xfcbad3, 0xa8e6cf,
-    0xdcedc1, 0xffd3b6, 0xffaaa5, 0xff8b94
-];
+    <!-- Movement Joystick (Left Side) -->
+    <div id="joystick">
+        <div id="joystickStick"></div>
+    </div>
 
-function createBuilding(x, z, width, height, depth, color) {
-    const geometry = new THREE.BoxGeometry(width, height, depth);
-    const material = new THREE.MeshStandardMaterial({ 
-        color: color,
-        roughness: 0.7,
-        metalness: 0.2
-    });
+    <!-- Camera Control Zone (Right Side) -->
+    <div id="cameraControl"></div>
+
+    <!-- Action Buttons (Bottom Right) -->
+    <div id="actionButtons">
+        <div class="actionButton" id="btnRun">RUN</div>
+        <div class="actionButton" id="btnJump">JUMP</div>
+        <div class="actionButton" id="btnFire">FIRE</div>
+        <div class="actionButton" id="btnReload">RELOAD</div>
+    </div>
+
+    <!-- Three.js via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     
-    const building = new THREE.Mesh(geometry, material);
-    building.position.set(x, height / 2, z);
-    building.castShadow = true;
-    building.receiveShadow = true;
-    
-    return building;
-}
-
-const buildings = [];
-
-buildings.push(createBuilding(-40, -40, 15, 25, 15, buildingColors[0]));
-buildings.push(createBuilding(-40, -10, 12, 30, 12, buildingColors[1]));
-buildings.push(createBuilding(-40, 20, 18, 20, 14, buildingColors[2]));
-buildings.push(createBuilding(-40, 50, 10, 35, 10, buildingColors[3]));
-
-buildings.push(createBuilding(40, -40, 20, 22, 20, buildingColors[4]));
-buildings.push(createBuilding(40, -10, 14, 28, 16, buildingColors[5]));
-buildings.push(createBuilding(40, 20, 16, 32, 12, buildingColors[6]));
-buildings.push(createBuilding(40, 50, 12, 18, 14, buildingColors[7]));
-
-buildings.push(createBuilding(0, 60, 25, 40, 25, buildingColors[8]));
-buildings.push(createBuilding(-20, 80, 15, 24, 15, buildingColors[9]));
-buildings.push(createBuilding(20, 80, 18, 28, 18, buildingColors[10]));
-
-buildings.push(createBuilding(0, -60, 30, 35, 20, buildingColors[11]));
-
-buildings.forEach(building => scene.add(building));
-
-console.log('City buildings generated:', buildings.length);
-
-// --- PLAYER CHARACTER (GLTF MODEL) ---
-let player = new THREE.Group();
-let playerModel = null;
-let mixer = null;
-let animations = {};
-let currentAction = null;
-let isPlayerLoaded = false;
-
-player.position.set(0, 0, 0);
-scene.add(player);
-
-// --- ANIMATION SYSTEM ---
-function setupAnimations(gltf) {
-    mixer = new THREE.AnimationMixer(gltf.scene);
-    
-    gltf.animations.forEach((clip) => {
-        const action = mixer.clipAction(clip);
-        animations[clip.name] = action;
-        console.log('Animation loaded:', clip.name);
-    });
-
-    // Start with Idle animation if available
-    if (animations['Idle']) {
-        currentAction = animations['Idle'];
-        currentAction.play();
-        console.log('Playing Idle animation');
-    } else if (animations['idle']) {
-        currentAction = animations['idle'];
-        currentAction.play();
-        console.log('Playing idle animation');
-    } else if (gltf.animations.length > 0) {
-        // Fallback to first animation
-        currentAction = mixer.clipAction(gltf.animations[0]);
-        currentAction.play();
-        console.log('Playing first available animation:', gltf.animations[0].name);
-    }
-}
-
-function switchAnimation(toAnimationName, duration = 0.3) {
-    if (!mixer || !animations[toAnimationName]) {
-        console.warn('Animation not found:', toAnimationName);
-        return;
-    }
-
-    const toAction = animations[toAnimationName];
-
-    if (currentAction === toAction) return;
-
-    if (currentAction) {
-        currentAction.fadeOut(duration);
-    }
-
-    toAction.reset().fadeIn(duration).play();
-    currentAction = toAction;
-}
-
-// --- LOAD GLTF MODEL ---
-const loader = new THREE.GLTFLoader();
-
-console.log('Loading character model: Mainmc1.glb');
-
-loader.load(
-    'Mainmc1.glb',
-    function (gltf) {
-        console.log('GLTF model loaded successfully');
-        
-        playerModel = gltf.scene;
-        
-        // Enable shadows on all meshes
-        playerModel.traverse((child) => {
-            if (child.isMesh) {
-                child.castShadow = true;
-                child.receiveShadow = true;
-            }
-        });
-
-        // Scale model if needed (adjust based on your model's size)
-        playerModel.scale.set(1, 1, 1);
-        
-        player.add(playerModel);
-        
-        // Setup animations
-        if (gltf.animations && gltf.animations.length > 0) {
-            console.log('Found', gltf.animations.length, 'animations in model');
-            setupAnimations(gltf);
-        } else {
-            console.warn('No animations found in GLTF model');
-        }
-        
-        isPlayerLoaded = true;
-        console.log('Player ready');
-    },
-    function (xhr) {
-        const percentComplete = (xhr.loaded / xhr.total) * 100;
-        console.log('Loading progress:', Math.round(percentComplete) + '%');
-    },
-    function (error) {
-        console.error('Error loading GLTF model:', error);
-        console.log('Make sure Mainmc1.glb is in the same directory as index.html');
-    }
-);
-
-// --- PLAYER MOVEMENT STATE ---
-const movement = {
-    forward: 0,
-    right: 0,
-    speed: 0.15,
-    isMoving: false
-};
-
-// --- CAMERA CONTROL STATE ---
-const cameraControl = {
-    distance: 8,
-    height: 4,
-    yaw: 0,
-    pitch: 0.3,
-    minPitch: -0.5,
-    maxPitch: 1.2,
-    sensitivity: 0.003
-};
-
-// --- VIRTUAL JOYSTICK (LEFT SIDE) ---
-const joystick = document.getElementById('joystick');
-const joystickStick = document.getElementById('joystickStick');
-
-let joystickActive = false;
-let joystickCenter = { x: 0, y: 0 };
-const joystickMaxDistance = 50;
-
-function updateJoystickCenter() {
-    const rect = joystick.getBoundingClientRect();
-    joystickCenter.x = rect.left + rect.width / 2;
-    joystickCenter.y = rect.top + rect.height / 2;
-}
-
-updateJoystickCenter();
-window.addEventListener('resize', updateJoystickCenter);
-
-function handleJoystickMove(touchX, touchY) {
-    const dx = touchX - joystickCenter.x;
-    const dy = touchY - joystickCenter.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-
-    let clampedX = dx;
-    let clampedY = dy;
-
-    if (distance > joystickMaxDistance) {
-        clampedX = (dx / distance) * joystickMaxDistance;
-        clampedY = (dy / distance) * joystickMaxDistance;
-    }
-
-    joystickStick.style.transform = `translate(calc(-50% + ${clampedX}px), calc(-50% + ${clampedY}px))`;
-
-    movement.right = clampedX / joystickMaxDistance;
-    movement.forward = -clampedY / joystickMaxDistance;
-    
-    // Check if player is moving
-    const isNowMoving = Math.abs(movement.forward) > 0.1 || Math.abs(movement.right) > 0.1;
-    
-    if (isNowMoving !== movement.isMoving) {
-        movement.isMoving = isNowMoving;
-        
-        if (movement.isMoving) {
-            // Try multiple common naming conventions for run animation
-            if (animations['Run']) {
-                switchAnimation('Run', 0.2);
-            } else if (animations['run']) {
-                switchAnimation('run', 0.2);
-            } else if (animations['Running']) {
-                switchAnimation('Running', 0.2);
-            } else if (animations['Walk']) {
-                switchAnimation('Walk', 0.2);
-            } else if (animations['walk']) {
-                switchAnimation('walk', 0.2);
-            }
-        } else {
-            // Try multiple common naming conventions for idle animation
-            if (animations['Idle']) {
-                switchAnimation('Idle', 0.2);
-            } else if (animations['idle']) {
-                switchAnimation('idle', 0.2);
-            } else if (animations['Standing']) {
-                switchAnimation('Standing', 0.2);
-            }
-        }
-    }
-}
-
-function resetJoystick() {
-    joystickStick.style.transform = 'translate(-50%, -50%)';
-    movement.forward = 0;
-    movement.right = 0;
-    joystickActive = false;
-    
-    if (movement.isMoving) {
-        movement.isMoving = false;
-        
-        // Switch back to idle
-        if (animations['Idle']) {
-            switchAnimation('Idle', 0.2);
-        } else if (animations['idle']) {
-            switchAnimation('idle', 0.2);
-        } else if (animations['Standing']) {
-            switchAnimation('Standing', 0.2);
-        }
-    }
-}
-
-joystick.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    joystickActive = true;
-    updateJoystickCenter();
-    const touch = e.touches[0];
-    handleJoystickMove(touch.clientX, touch.clientY);
-}, { passive: false });
-
-joystick.addEventListener('touchmove', (e) => {
-    e.preventDefault();
-    if (joystickActive) {
-        const touch = e.touches[0];
-        handleJoystickMove(touch.clientX, touch.clientY);
-    }
-}, { passive: false });
-
-joystick.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    resetJoystick();
-}, { passive: false });
-
-console.log('Joystick initialized');
-
-// --- CAMERA CONTROL (RIGHT SIDE DRAG) ---
-const cameraControlZone = document.getElementById('cameraControl');
-
-let cameraDragActive = false;
-let lastCameraTouchX = 0;
-let lastCameraTouchY = 0;
-
-cameraControlZone.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    cameraDragActive = true;
-    const touch = e.touches[0];
-    lastCameraTouchX = touch.clientX;
-    lastCameraTouchY = touch.clientY;
-}, { passive: false });
-
-cameraControlZone.addEventListener('touchmove', (e) => {
-    e.preventDefault();
-    if (cameraDragActive) {
-        const touch = e.touches[0];
-        const deltaX = touch.clientX - lastCameraTouchX;
-        const deltaY = touch.clientY - lastCameraTouchY;
-
-        cameraControl.yaw -= deltaX * cameraControl.sensitivity;
-        cameraControl.pitch += deltaY * cameraControl.sensitivity;
-
-        cameraControl.pitch = Math.max(
-            cameraControl.minPitch,
-            Math.min(cameraControl.maxPitch, cameraControl.pitch)
-        );
-
-        lastCameraTouchX = touch.clientX;
-        lastCameraTouchY = touch.clientY;
-    }
-}, { passive: false });
-
-cameraControlZone.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    cameraDragActive = false;
-}, { passive: false });
-
-console.log('Camera control initialized');
-
-// --- UPDATE PLAYER ---
-function updatePlayer(deltaTime) {
-    if (!isPlayerLoaded) return;
-
-    if (Math.abs(movement.forward) > 0.01 || Math.abs(movement.right) > 0.01) {
-        const cameraYawAngle = cameraControl.yaw;
-        
-        const forwardX = Math.sin(cameraYawAngle) * movement.forward;
-        const forwardZ = Math.cos(cameraYawAngle) * movement.forward;
-        
-        const rightX = Math.sin(cameraYawAngle + Math.PI / 2) * movement.right;
-        const rightZ = Math.cos(cameraYawAngle + Math.PI / 2) * movement.right;
-        
-        const moveX = (forwardX + rightX) * movement.speed;
-        const moveZ = (forwardZ + rightZ) * movement.speed;
-        
-        player.position.x += moveX;
-        player.position.z += moveZ;
-        
-        // Rotate player to face movement direction
-        const moveAngle = Math.atan2(moveX, moveZ);
-        player.rotation.y = moveAngle;
-    }
-
-    // Update animation mixer
-    if (mixer) {
-        mixer.update(deltaTime);
-    }
-}
-
-// --- UPDATE CAMERA (THIRD-PERSON FOLLOW) ---
-function updateCamera() {
-    if (!isPlayerLoaded) return;
-
-    const offsetX = Math.sin(cameraControl.yaw) * cameraControl.distance * Math.cos(cameraControl.pitch);
-    const offsetY = cameraControl.height + Math.sin(cameraControl.pitch) * cameraControl.distance;
-    const offsetZ = Math.cos(cameraControl.yaw) * cameraControl.distance * Math.cos(cameraControl.pitch);
-
-    camera.position.x = player.position.x - offsetX;
-    camera.position.y = player.position.y + offsetY;
-    camera.position.z = player.position.z - offsetZ;
-
-    camera.lookAt(
-        player.position.x,
-        player.position.y + 2,
-        player.position.z
-    );
-}
-
-// --- RENDER LOOP ---
-const clock = new THREE.Clock();
-
-function animate() {
-    requestAnimationFrame(animate);
-    
-    const deltaTime = clock.getDelta();
-    
-    updatePlayer(deltaTime);
-    updateCamera();
-    
-    renderer.render(scene, camera);
-}
-
-console.log('Starting render loop...');
-animate();
+    <script src="game.js"></script>
+</body>
+</html>
