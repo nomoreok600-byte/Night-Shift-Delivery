@@ -1,10 +1,10 @@
 // ============================================
-// OPEN WORLD 3D ENGINE - ADVANCED STATE MACHINE
+// OPEN WORLD 3D ENGINE - FIRST-PERSON (FPS)
 // Three.js, GLTF character, gun stance, roll/jump split,
 // shooting states, true multi-touch for mobile
 // ============================================
 
-console.log('Initializing Open World Engine...');
+console.log('Initializing Open World Engine (FPS)...');
 console.log('THREE.js version:', THREE.REVISION);
 
 // --- SCENE SETUP ---
@@ -14,11 +14,16 @@ scene.fog = new THREE.Fog(0x87ceeb, 50, 300);
 
 // --- PERSPECTIVE CAMERA ---
 const camera = new THREE.PerspectiveCamera(
-    60,
+    75,                                      // wider FOV reads better in first person
     window.innerWidth / window.innerHeight,
     0.1,
     1000
 );
+
+// YXZ order is the standard FPS ordering: yaw applied first, then pitch
+// relative to the yawed frame. Without this, pitch and yaw contaminate
+// each other and the horizon rolls.
+camera.rotation.order = 'YXZ';
 
 // --- RENDERER ---
 const renderer = new THREE.WebGLRenderer({
@@ -109,7 +114,6 @@ let playerModel = null;
 let mixer = null;
 let isPlayerLoaded = false;
 
-// Named animation actions
 const clips = {
     idleGun: null,
     walk: null,
@@ -121,6 +125,47 @@ const clips = {
 
 let currentAction = null;
 
+// ============================================
+// FIRST-PERSON VIEW STATE
+// look.yaw is the single source of truth for facing: the camera,
+// the player mesh, and the movement vectors all derive from it.
+// ============================================
+
+const look = {
+    yaw: 0,                       // horizontal facing, radians
+    pitch: 0,                     // vertical only, camera-local
+    minPitch: -Math.PI / 2,       // straight down
+    maxPitch: Math.PI / 2,        // straight up
+    sensitivity: 0.004,
+    invertPitch: false            // flip if drag-up-to-look-up feels wrong
+};
+
+const fpsView = {
+    eyeHeight: 1.65,              // camera Y above player origin
+    forwardOffset: 0.35           // push forward so we clear the head mesh
+};
+
+// Mesh forward is assumed +Z (matching the atan2(moveX, moveZ) convention
+// used previously). If the body renders backwards, set this to Math.PI.
+const MODEL_YAW_OFFSET = 0;
+
+// Reused vectors so the render loop allocates nothing per frame
+const forwardVec = new THREE.Vector3();
+const rightVec = new THREE.Vector3();
+
+// Camera forward for a given yaw. Three.js cameras look down -Z,
+// so forward = (-sin yaw, 0, -cos yaw).
+function getForwardVector(target) {
+    target.set(-Math.sin(look.yaw), 0, -Math.cos(look.yaw));
+    return target;
+}
+
+// Right vector = forward x up
+function getRightVector(target) {
+    target.set(Math.cos(look.yaw), 0, -Math.sin(look.yaw));
+    return target;
+}
+
 // --- PLAYER PHYSICS ---
 const physics = {
     yVelocity: 0,
@@ -128,11 +173,10 @@ const physics = {
     jumpStrength: 0.45,
     isGrounded: true,
     groundLevel: 0,
-    // Roll dash state
     isRolling: false,
     rollTimer: 0,
-    rollDuration: 0.7,        // seconds, overwritten by clip length if available
-    rollBoost: 0.42,          // forward units per frame at roll start
+    rollDuration: 0.7,
+    rollBoost: 0.42,
     rollDirX: 0,
     rollDirZ: 0
 };
@@ -148,22 +192,10 @@ const movement = {
     isFiring: false
 };
 
-// --- CAMERA ORBIT STATE ---
-const cameraControl = {
-    distance: 8,
-    height: 4,
-    yaw: 0,
-    pitch: 0.3,
-    minPitch: -0.5,
-    maxPitch: 1.2,
-    sensitivity: 0.003
-};
-
 // ============================================
 // ANIMATION SYSTEM
 // ============================================
 
-// Exact clip names present in Mainmc1.glb
 const CLIP_NAMES = {
     idleGun: 'Idle_Gun',
     walk: 'Walk',
@@ -176,49 +208,39 @@ const CLIP_NAMES = {
 function setupAnimations(gltf) {
     mixer = new THREE.AnimationMixer(gltf.scene);
 
-    // Build a lookup of clips by exact name
     const byName = {};
     gltf.animations.forEach(clip => {
         byName[clip.name] = clip;
-        console.log('Found clip:', clip.name);
     });
 
-    // Map each state to its action
     Object.keys(CLIP_NAMES).forEach(key => {
-        const clipName = CLIP_NAMES[key];
-        const clip = byName[clipName];
+        const clip = byName[CLIP_NAMES[key]];
         if (clip) {
             clips[key] = mixer.clipAction(clip);
-            console.log('Mapped', key, '->', clipName);
+            console.log('Mapped', key, '->', CLIP_NAMES[key]);
         } else {
-            console.warn('Missing clip:', clipName);
+            console.warn('Missing clip:', CLIP_NAMES[key]);
         }
     });
 
-    // Roll plays once and holds its final frame, so we can time the dash to it
     if (clips.roll) {
         clips.roll.setLoop(THREE.LoopOnce, 1);
         clips.roll.clampWhenFinished = true;
         physics.rollDuration = clips.roll.getClip().duration || physics.rollDuration;
     }
 
-    // Shooting clips loop while the fire button is held
     if (clips.gunShoot) clips.gunShoot.setLoop(THREE.LoopRepeat, Infinity);
     if (clips.runShoot) clips.runShoot.setLoop(THREE.LoopRepeat, Infinity);
-
-    // Locomotion loops
     if (clips.idleGun) clips.idleGun.setLoop(THREE.LoopRepeat, Infinity);
     if (clips.walk) clips.walk.setLoop(THREE.LoopRepeat, Infinity);
     if (clips.run) clips.run.setLoop(THREE.LoopRepeat, Infinity);
 
-    // Default stance
     if (clips.idleGun) {
         currentAction = clips.idleGun;
         currentAction.play();
     }
 }
 
-// Smooth blend between two actions. Falls back silently if the clip is missing.
 function crossFadeTo(target, duration = 0.25) {
     if (!mixer || !target || currentAction === target) return;
 
@@ -235,26 +257,13 @@ function crossFadeTo(target, duration = 0.25) {
     currentAction = target;
 }
 
-// ============================================
-// STATE MACHINE
-// Priority: Roll > Shooting > Run > Walk > Idle_Gun
-// Jumping deliberately does NOT change the clip — the current
-// frame carries through the air as specified.
-// ============================================
+// Priority: Roll > airborne hold > shooting > run > walk > Idle_Gun
 function updateAnimationState() {
     if (!mixer || !isPlayerLoaded) return;
 
-    // 1. Roll owns the character until it finishes
-    if (physics.isRolling) {
-        return;
-    }
+    if (physics.isRolling) return;
+    if (!physics.isGrounded) return;
 
-    // 2. Airborne (non-roll jump): hold whatever is playing
-    if (!physics.isGrounded) {
-        return;
-    }
-
-    // 3. Shooting variants
     if (movement.isFiring) {
         if (movement.isMoving && movement.isRunning && clips.runShoot) {
             crossFadeTo(clips.runShoot, 0.15);
@@ -264,7 +273,6 @@ function updateAnimationState() {
         return;
     }
 
-    // 4. Locomotion
     if (movement.isMoving) {
         if (movement.isRunning && clips.run) {
             crossFadeTo(clips.run, 0.25);
@@ -274,7 +282,6 @@ function updateAnimationState() {
         return;
     }
 
-    // 5. Default stance
     if (clips.idleGun) {
         crossFadeTo(clips.idleGun, 0.3);
     }
@@ -283,6 +290,7 @@ function updateAnimationState() {
 // ============================================
 // MODEL LOADING
 // ============================================
+
 const loader = new THREE.GLTFLoader();
 
 loader.load(
@@ -294,6 +302,8 @@ loader.load(
             if (child.isMesh) {
                 child.castShadow = true;
                 child.receiveShadow = true;
+                // Keeps the body from occluding the lens at close range
+                child.frustumCulled = false;
             }
         });
 
@@ -321,8 +331,6 @@ loader.load(
 
 // ============================================
 // MULTI-TOUCH INPUT
-// Each control tracks its own touch.identifier so the left thumb
-// and right thumb never steal each other's events.
 // ============================================
 
 const touches = {
@@ -414,18 +422,21 @@ function endJoystickTouch(e) {
 joystick.addEventListener('touchend', endJoystickTouch, { passive: false });
 joystick.addEventListener('touchcancel', endJoystickTouch, { passive: false });
 
-// --- CAMERA DRAG (RIGHT) ---
+// --- FPS LOOK (RIGHT SIDE DRAG) ---
+// Horizontal drag turns the whole character (yaw), which is what keeps
+// joystick movement aligned with the view. Vertical drag pitches the
+// camera only, so the body never tips over.
 const cameraControlZone = document.getElementById('cameraControl');
 
-let lastCameraTouchX = 0;
-let lastCameraTouchY = 0;
+let lastLookX = 0;
+let lastLookY = 0;
 
 cameraControlZone.addEventListener('touchstart', e => {
     e.preventDefault();
     const touch = e.changedTouches[0];
     touches.camera = touch.identifier;
-    lastCameraTouchX = touch.clientX;
-    lastCameraTouchY = touch.clientY;
+    lastLookX = touch.clientX;
+    lastLookY = touch.clientY;
 }, { passive: false });
 
 cameraControlZone.addEventListener('touchmove', e => {
@@ -433,24 +444,25 @@ cameraControlZone.addEventListener('touchmove', e => {
     for (let i = 0; i < e.touches.length; i++) {
         const touch = e.touches[i];
         if (touch.identifier === touches.camera) {
-            const deltaX = touch.clientX - lastCameraTouchX;
-            const deltaY = touch.clientY - lastCameraTouchY;
+            const deltaX = touch.clientX - lastLookX;
+            const deltaY = touch.clientY - lastLookY;
 
-            cameraControl.yaw -= deltaX * cameraControl.sensitivity;
-            cameraControl.pitch += deltaY * cameraControl.sensitivity;
-            cameraControl.pitch = Math.max(
-                cameraControl.minPitch,
-                Math.min(cameraControl.maxPitch, cameraControl.pitch)
-            );
+            // YAW: rotates the player mesh, so "forward" follows the view
+            look.yaw -= deltaX * look.sensitivity;
 
-            lastCameraTouchX = touch.clientX;
-            lastCameraTouchY = touch.clientY;
+            // PITCH: camera-only, clamped so the view can't flip
+            const pitchDelta = deltaY * look.sensitivity;
+            look.pitch += look.invertPitch ? pitchDelta : -pitchDelta;
+            look.pitch = Math.max(look.minPitch, Math.min(look.maxPitch, look.pitch));
+
+            lastLookX = touch.clientX;
+            lastLookY = touch.clientY;
             break;
         }
     }
 }, { passive: false });
 
-function endCameraTouch(e) {
+function endLookTouch(e) {
     e.preventDefault();
     for (let i = 0; i < e.changedTouches.length; i++) {
         if (e.changedTouches[i].identifier === touches.camera) {
@@ -460,8 +472,8 @@ function endCameraTouch(e) {
     }
 }
 
-cameraControlZone.addEventListener('touchend', endCameraTouch, { passive: false });
-cameraControlZone.addEventListener('touchcancel', endCameraTouch, { passive: false });
+cameraControlZone.addEventListener('touchend', endLookTouch, { passive: false });
+cameraControlZone.addEventListener('touchcancel', endLookTouch, { passive: false });
 
 // ============================================
 // ACTION BUTTONS
@@ -493,8 +505,6 @@ btnRun.addEventListener('touchend', releaseRun, { passive: false });
 btnRun.addEventListener('touchcancel', releaseRun, { passive: false });
 
 // --- JUMP / ROLL ---
-// Running + Jump = Roll (forward dash, plays once)
-// Not running + Jump = vertical hop, current clip frame carries through the air
 btnJump.addEventListener('touchstart', e => {
     e.preventDefault();
     e.stopPropagation();
@@ -506,7 +516,6 @@ btnJump.addEventListener('touchstart', e => {
     } else {
         physics.yVelocity = physics.jumpStrength;
         physics.isGrounded = false;
-        // No animation change — the airborne frame is whatever was playing.
     }
 }, { passive: false });
 
@@ -514,11 +523,12 @@ function startRoll() {
     physics.isRolling = true;
     physics.rollTimer = 0;
 
-    // Dash along the direction the character is currently facing
-    physics.rollDirX = Math.sin(player.rotation.y);
-    physics.rollDirZ = Math.cos(player.rotation.y);
+    // Dash along the view forward vector, not the mesh rotation,
+    // so the roll always goes where the player is looking.
+    getForwardVector(forwardVec);
+    physics.rollDirX = forwardVec.x;
+    physics.rollDirZ = forwardVec.z;
 
-    // Roll clip overrides the state machine for its full duration
     if (currentAction && currentAction !== clips.roll) {
         currentAction.fadeOut(0.1);
     }
@@ -544,14 +554,13 @@ function releaseFire(e) {
     e.stopPropagation();
     movement.isFiring = false;
     btnFire.classList.remove('active');
-    // State machine picks Run / Walk / Idle_Gun based on current inputs
     updateAnimationState();
 }
 
 btnFire.addEventListener('touchend', releaseFire, { passive: false });
 btnFire.addEventListener('touchcancel', releaseFire, { passive: false });
 
-// --- RELOAD (placeholder until a Reload clip exists) ---
+// --- RELOAD (placeholder) ---
 btnReload.addEventListener('touchstart', e => {
     e.preventDefault();
     e.stopPropagation();
@@ -565,14 +574,16 @@ btnReload.addEventListener('touchstart', e => {
 function updatePlayer(deltaTime) {
     if (!isPlayerLoaded) return;
 
+    // Mesh always faces where we're looking. Mesh forward is +Z, camera
+    // forward is -Z, hence the PI correction.
+    player.rotation.y = look.yaw + Math.PI + MODEL_YAW_OFFSET;
+
     // --- Roll dash ---
     if (physics.isRolling) {
         physics.rollTimer += deltaTime;
 
-        // Ease the dash out over the clip's duration so it decelerates naturally
         const progress = Math.min(physics.rollTimer / physics.rollDuration, 1);
-        const falloff = 1 - progress;
-        const dash = physics.rollBoost * falloff;
+        const dash = physics.rollBoost * (1 - progress);
 
         player.position.x += physics.rollDirX * dash;
         player.position.z += physics.rollDirZ * dash;
@@ -593,29 +604,23 @@ function updatePlayer(deltaTime) {
             player.position.y = physics.groundLevel;
             physics.yVelocity = 0;
             physics.isGrounded = true;
-            // Resume ground state machine on landing
             updateAnimationState();
         }
     }
 
-    // --- Horizontal movement (blocked during roll so the dash reads cleanly) ---
+    // --- Horizontal movement, relative to facing ---
     if (!physics.isRolling &&
         (Math.abs(movement.forward) > 0.01 || Math.abs(movement.right) > 0.01)) {
 
-        const yaw = cameraControl.yaw;
+        getForwardVector(forwardVec);
+        getRightVector(rightVec);
+
         const speed = movement.isRunning ? movement.runSpeed : movement.walkSpeed;
 
-        const forwardX = Math.sin(yaw) * movement.forward;
-        const forwardZ = Math.cos(yaw) * movement.forward;
-        const rightX = Math.sin(yaw + Math.PI / 2) * movement.right;
-        const rightZ = Math.cos(yaw + Math.PI / 2) * movement.right;
-
-        const moveX = (forwardX + rightX) * speed;
-        const moveZ = (forwardZ + rightZ) * speed;
-
-        player.position.x += moveX;
-        player.position.z += moveZ;
-        player.rotation.y = Math.atan2(moveX, moveZ);
+        player.position.x +=
+            (forwardVec.x * movement.forward + rightVec.x * movement.right) * speed;
+        player.position.z +=
+            (forwardVec.z * movement.forward + rightVec.z * movement.right) * speed;
     }
 
     if (mixer) {
@@ -626,16 +631,22 @@ function updatePlayer(deltaTime) {
 function updateCamera() {
     if (!isPlayerLoaded) return;
 
-    const cosPitch = Math.cos(cameraControl.pitch);
-    const offsetX = Math.sin(cameraControl.yaw) * cameraControl.distance * cosPitch;
-    const offsetY = cameraControl.height + Math.sin(cameraControl.pitch) * cameraControl.distance;
-    const offsetZ = Math.cos(cameraControl.yaw) * cameraControl.distance * cosPitch;
+    getForwardVector(forwardVec);
 
-    camera.position.x = player.position.x - offsetX;
-    camera.position.y = player.position.y + offsetY;
-    camera.position.z = player.position.z - offsetZ;
+    // Lock to the player's X/Z at eye level, nudged forward along the
+    // view axis so we sit outside the head mesh instead of inside it.
+    camera.position.set(
+        player.position.x + forwardVec.x * fpsView.forwardOffset,
+        player.position.y + fpsView.eyeHeight,
+        player.position.z + forwardVec.z * fpsView.forwardOffset
+    );
 
-    camera.lookAt(player.position.x, player.position.y + 2, player.position.z);
+    // Direct Euler assignment instead of lookAt: lookAt degenerates when
+    // the target is straight up or down, which is exactly where the pitch
+    // clamp lets us go.
+    camera.rotation.y = look.yaw;
+    camera.rotation.x = look.pitch;
+    camera.rotation.z = 0;
 }
 
 // ============================================
