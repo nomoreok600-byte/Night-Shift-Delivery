@@ -1,6 +1,6 @@
 // ============================================
-// OPEN WORLD 3D ENGINE - MULTI-TOUCH + ACTIONS
-// Three.js, GLTF character, sprint/jump mechanics,
+// OPEN WORLD 3D ENGINE - AUTO-DETECT ANIMATIONS
+// Three.js, GLTF character with smart animation mapping,
 // true multi-touch support for mobile
 // ============================================
 
@@ -126,7 +126,12 @@ console.log('City buildings generated:', buildings.length);
 let player = new THREE.Group();
 let playerModel = null;
 let mixer = null;
-let animations = {};
+let animationActions = {
+    idle: null,
+    walk: null,
+    run: null,
+    jump: null
+};
 let currentAction = null;
 let isPlayerLoaded = false;
 
@@ -139,45 +144,133 @@ const physics = {
     gravity: -0.025,
     jumpStrength: 0.5,
     isGrounded: true,
-    groundLevel: 0
+    groundLevel: 0,
+    isJumping: false
 };
 
-// --- ANIMATION SYSTEM ---
-function setupAnimations(gltf) {
-    mixer = new THREE.AnimationMixer(gltf.scene);
+// --- AUTO-DETECT ANIMATION SYSTEM ---
+function autoDetectAnimations(gltf) {
+    console.log('\n=== AUTO-DETECTING ANIMATIONS ===');
+    console.log('Total animations found:', gltf.animations.length);
     
-    gltf.animations.forEach((clip) => {
-        const action = mixer.clipAction(clip);
-        animations[clip.name] = action;
-        console.log('Animation loaded:', clip.name);
-    });
-
-    if (animations['Idle'] || animations['idle']) {
-        currentAction = animations['Idle'] || animations['idle'];
-        currentAction.play();
-        console.log('Playing Idle animation');
-    } else if (gltf.animations.length > 0) {
-        currentAction = mixer.clipAction(gltf.animations[0]);
-        currentAction.play();
-        console.log('Playing first available animation:', gltf.animations[0].name);
-    }
-}
-
-function switchAnimation(toAnimationName, duration = 0.25) {
-    if (!mixer || !animations[toAnimationName]) {
+    if (gltf.animations.length === 0) {
+        console.warn('No animations found in model');
         return;
     }
 
-    const toAction = animations[toAnimationName];
+    mixer = new THREE.AnimationMixer(gltf.scene);
 
-    if (currentAction === toAction) return;
+    // Log all available animations
+    gltf.animations.forEach((clip, index) => {
+        console.log(`Animation ${index}: "${clip.name}"`);
+    });
 
+    // Auto-detect by keywords (case-insensitive)
+    gltf.animations.forEach((clip) => {
+        const nameLower = clip.name.toLowerCase();
+        const action = mixer.clipAction(clip);
+
+        // Idle detection
+        if (!animationActions.idle) {
+            if (nameLower.includes('idle') || 
+                nameLower.includes('standing') || 
+                nameLower.includes('breath')) {
+                animationActions.idle = action;
+                console.log('✓ Mapped IDLE:', clip.name);
+            }
+        }
+
+        // Walk detection
+        if (!animationActions.walk) {
+            if (nameLower.includes('walk')) {
+                animationActions.walk = action;
+                console.log('✓ Mapped WALK:', clip.name);
+            }
+        }
+
+        // Run detection
+        if (!animationActions.run) {
+            if (nameLower.includes('run') || 
+                nameLower.includes('sprint') || 
+                nameLower.includes('jog')) {
+                animationActions.run = action;
+                console.log('✓ Mapped RUN:', clip.name);
+            }
+        }
+
+        // Jump detection
+        if (!animationActions.jump) {
+            if (nameLower.includes('jump') || 
+                nameLower.includes('leap') || 
+                nameLower.includes('hop')) {
+                animationActions.jump = action;
+                console.log('✓ Mapped JUMP:', clip.name);
+            }
+        }
+    });
+
+    // Fallback: If critical animations missing, use indices
+    if (!animationActions.idle && gltf.animations.length > 0) {
+        animationActions.idle = mixer.clipAction(gltf.animations[0]);
+        console.warn('⚠ IDLE fallback to index 0:', gltf.animations[0].name);
+    }
+
+    if (!animationActions.walk && gltf.animations.length > 1) {
+        animationActions.walk = mixer.clipAction(gltf.animations[1]);
+        console.warn('⚠ WALK fallback to index 1:', gltf.animations[1].name);
+    }
+
+    if (!animationActions.run && gltf.animations.length > 2) {
+        animationActions.run = mixer.clipAction(gltf.animations[2]);
+        console.warn('⚠ RUN fallback to index 2:', gltf.animations[2].name);
+    } else if (!animationActions.run && animationActions.walk) {
+        animationActions.run = animationActions.walk;
+        console.warn('⚠ RUN fallback to WALK animation');
+    }
+
+    if (!animationActions.jump && gltf.animations.length > 3) {
+        animationActions.jump = mixer.clipAction(gltf.animations[3]);
+        console.warn('⚠ JUMP fallback to index 3:', gltf.animations[3].name);
+    }
+
+    console.log('\n=== ANIMATION MAPPING COMPLETE ===');
+    console.log('Idle:', animationActions.idle ? '✓' : '✗');
+    console.log('Walk:', animationActions.walk ? '✓' : '✗');
+    console.log('Run:', animationActions.run ? '✓' : '✗');
+    console.log('Jump:', animationActions.jump ? '✓' : '✗');
+    console.log('================================\n');
+
+    // Start with idle animation
+    if (animationActions.idle) {
+        currentAction = animationActions.idle;
+        currentAction.play();
+        console.log('Started playing IDLE animation');
+    }
+}
+
+// --- SMOOTH ANIMATION CROSSFADE ---
+function crossFadeTo(targetAction, duration = 0.3) {
+    if (!targetAction || !mixer) {
+        return;
+    }
+
+    if (currentAction === targetAction) {
+        return;
+    }
+
+    // Fade out current action
     if (currentAction) {
         currentAction.fadeOut(duration);
     }
 
-    toAction.reset().fadeIn(duration).play();
-    currentAction = toAction;
+    // Fade in target action
+    targetAction.reset();
+    targetAction.setEffectiveTimeScale(1);
+    targetAction.setEffectiveWeight(1);
+    targetAction.fadeIn(duration);
+    targetAction.play();
+
+    currentAction = targetAction;
 }
 
 // --- LOAD GLTF MODEL ---
@@ -188,7 +281,7 @@ console.log('Loading character model: Mainmc1.glb');
 loader.load(
     'Mainmc1.glb',
     function (gltf) {
-        console.log('GLTF model loaded successfully');
+        console.log('✓ GLTF model loaded successfully');
         
         playerModel = gltf.scene;
         
@@ -204,21 +297,20 @@ loader.load(
         player.add(playerModel);
         
         if (gltf.animations && gltf.animations.length > 0) {
-            console.log('Found', gltf.animations.length, 'animations in model');
-            setupAnimations(gltf);
+            autoDetectAnimations(gltf);
         } else {
-            console.warn('No animations found in GLTF model');
+            console.warn('⚠ No animations found in GLTF model');
         }
         
         isPlayerLoaded = true;
-        console.log('Player ready');
+        console.log('✓ Player ready\n');
     },
     function (xhr) {
         const percentComplete = (xhr.loaded / xhr.total) * 100;
         console.log('Loading progress:', Math.round(percentComplete) + '%');
     },
     function (error) {
-        console.error('Error loading GLTF model:', error);
+        console.error('✗ Error loading GLTF model:', error);
     }
 );
 
@@ -303,20 +395,30 @@ function resetJoystick() {
     }
 }
 
+// --- ANIMATION STATE MACHINE ---
 function updateAnimationState() {
-    if (!movement.isMoving) {
-        if (animations['Idle']) switchAnimation('Idle', 0.2);
-        else if (animations['idle']) switchAnimation('idle', 0.2);
+    if (!mixer || !isPlayerLoaded) return;
+
+    // Priority 1: Jump (if jumping)
+    if (physics.isJumping && animationActions.jump) {
+        crossFadeTo(animationActions.jump, 0.15);
+        return;
+    }
+
+    // Priority 2: Movement states
+    if (movement.isMoving) {
+        if (movement.isRunning && animationActions.run) {
+            crossFadeTo(animationActions.run, 0.25);
+        } else if (animationActions.walk) {
+            crossFadeTo(animationActions.walk, 0.25);
+        } else if (animationActions.run) {
+            // Fallback if walk doesn't exist
+            crossFadeTo(animationActions.run, 0.25);
+        }
     } else {
-        if (movement.isRunning) {
-            if (animations['Run']) switchAnimation('Run', 0.2);
-            else if (animations['run']) switchAnimation('run', 0.2);
-            else if (animations['Running']) switchAnimation('Running', 0.2);
-        } else {
-            if (animations['Walk']) switchAnimation('Walk', 0.2);
-            else if (animations['walk']) switchAnimation('walk', 0.2);
-            else if (animations['Run']) switchAnimation('Run', 0.2);
-            else if (animations['run']) switchAnimation('run', 0.2);
+        // Priority 3: Idle (when stationary)
+        if (animationActions.idle) {
+            crossFadeTo(animationActions.idle, 0.3);
         }
     }
 }
@@ -429,13 +531,23 @@ btnRun.addEventListener('touchend', (e) => {
     updateAnimationState();
 }, { passive: false });
 
+btnRun.addEventListener('touchcancel', (e) => {
+    e.preventDefault();
+    movement.isRunning = false;
+    movement.currentSpeed = movement.walkSpeed;
+    btnRun.classList.remove('active');
+    updateAnimationState();
+}, { passive: false });
+
 // JUMP BUTTON
 btnJump.addEventListener('touchstart', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (physics.isGrounded) {
+    if (physics.isGrounded && !physics.isJumping) {
         physics.yVelocity = physics.jumpStrength;
         physics.isGrounded = false;
+        physics.isJumping = true;
+        updateAnimationState();
         console.log('Jump!');
     }
 }, { passive: false });
@@ -469,6 +581,12 @@ function updatePlayer(deltaTime) {
             player.position.y = physics.groundLevel;
             physics.yVelocity = 0;
             physics.isGrounded = true;
+            
+            // End jump animation when landing
+            if (physics.isJumping) {
+                physics.isJumping = false;
+                updateAnimationState();
+            }
         }
     }
 
@@ -492,6 +610,7 @@ function updatePlayer(deltaTime) {
         player.rotation.y = moveAngle;
     }
 
+    // Update animation mixer
     if (mixer) {
         mixer.update(deltaTime);
     }
