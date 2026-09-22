@@ -1,7 +1,7 @@
 // ============================================
-// OPEN WORLD 3D ENGINE - FIRST-PERSON (FPS)
-// Three.js, GLTF character, gun stance, roll/jump split,
-// shooting states, true multi-touch for mobile
+// OPEN WORLD 3D ENGINE - FIRST-PERSON (BODY VISIBLE)
+// Three.js, GLTF character with head hidden,
+// gun stance, roll/jump split, shooting states
 // ============================================
 
 console.log('Initializing Open World Engine (FPS)...');
@@ -14,15 +14,13 @@ scene.fog = new THREE.Fog(0x87ceeb, 50, 300);
 
 // --- PERSPECTIVE CAMERA ---
 const camera = new THREE.PerspectiveCamera(
-    75,                                      // wider FOV reads better in first person
+    75,
     window.innerWidth / window.innerHeight,
     0.1,
     1000
 );
 
-// YXZ order is the standard FPS ordering: yaw applied first, then pitch
-// relative to the yawed frame. Without this, pitch and yaw contaminate
-// each other and the horizon rolls.
+// YXZ order: yaw applied first, then pitch relative to yawed frame
 camera.rotation.order = 'YXZ';
 
 // --- RENDERER ---
@@ -127,40 +125,31 @@ let currentAction = null;
 
 // ============================================
 // FIRST-PERSON VIEW STATE
-// look.yaw is the single source of truth for facing: the camera,
-// the player mesh, and the movement vectors all derive from it.
 // ============================================
 
 const look = {
-    yaw: 0,                       // horizontal facing, radians
-    pitch: 0,                     // vertical only, camera-local
+    yaw: 0,                       // horizontal facing (player body rotation)
+    pitch: 0,                     // vertical look (camera only)
     minPitch: -Math.PI / 2,       // straight down
     maxPitch: Math.PI / 2,        // straight up
-    sensitivity: 0.004,
-    invertPitch: false            // flip if drag-up-to-look-up feels wrong
+    sensitivity: 0.004
 };
 
 const fpsView = {
-    eyeHeight: 1.65,              // camera Y above player origin
-    forwardOffset: 0.35           // push forward so we clear the head mesh
+    cameraHeight: 1.55            // neck/shoulder height above player origin
 };
 
-// Mesh forward is assumed +Z (matching the atan2(moveX, moveZ) convention
-// used previously). If the body renders backwards, set this to Math.PI.
-const MODEL_YAW_OFFSET = 0;
-
-// Reused vectors so the render loop allocates nothing per frame
+// Reused vectors
 const forwardVec = new THREE.Vector3();
 const rightVec = new THREE.Vector3();
 
-// Camera forward for a given yaw. Three.js cameras look down -Z,
-// so forward = (-sin yaw, 0, -cos yaw).
+// Camera looks down -Z, so forward is (-sin yaw, 0, -cos yaw)
 function getForwardVector(target) {
     target.set(-Math.sin(look.yaw), 0, -Math.cos(look.yaw));
     return target;
 }
 
-// Right vector = forward x up
+// Right = forward × up
 function getRightVector(target) {
     target.set(Math.cos(look.yaw), 0, -Math.sin(look.yaw));
     return target;
@@ -257,7 +246,6 @@ function crossFadeTo(target, duration = 0.25) {
     currentAction = target;
 }
 
-// Priority: Roll > airborne hold > shooting > run > walk > Idle_Gun
 function updateAnimationState() {
     if (!mixer || !isPlayerLoaded) return;
 
@@ -288,7 +276,7 @@ function updateAnimationState() {
 }
 
 // ============================================
-// MODEL LOADING
+// MODEL LOADING & HEAD HIDING
 // ============================================
 
 const loader = new THREE.GLTFLoader();
@@ -298,11 +286,32 @@ loader.load(
     function (gltf) {
         playerModel = gltf.scene;
 
+        // Hide the head mesh to prevent first-person clipping
+        // Common head mesh names: "Head", "head", "HEAD", "mixamorigHead", etc.
+        const headKeywords = ['head'];
+
         playerModel.traverse(child => {
             if (child.isMesh) {
-                child.castShadow = true;
-                child.receiveShadow = true;
-                // Keeps the body from occluding the lens at close range
+                const nameLower = child.name.toLowerCase();
+
+                // Check if this mesh is the head
+                let isHead = false;
+                for (let keyword of headKeywords) {
+                    if (nameLower.includes(keyword)) {
+                        isHead = true;
+                        break;
+                    }
+                }
+
+                if (isHead) {
+                    child.visible = false;
+                    console.log('Hidden head mesh:', child.name);
+                } else {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+
+                // Prevent culling when camera is inside body bounds
                 child.frustumCulled = false;
             }
         });
@@ -317,7 +326,7 @@ loader.load(
         }
 
         isPlayerLoaded = true;
-        console.log('Player ready');
+        console.log('Player ready (FPS mode with body visible)');
     },
     function (xhr) {
         if (xhr.total) {
@@ -423,9 +432,6 @@ joystick.addEventListener('touchend', endJoystickTouch, { passive: false });
 joystick.addEventListener('touchcancel', endJoystickTouch, { passive: false });
 
 // --- FPS LOOK (RIGHT SIDE DRAG) ---
-// Horizontal drag turns the whole character (yaw), which is what keeps
-// joystick movement aligned with the view. Vertical drag pitches the
-// camera only, so the body never tips over.
 const cameraControlZone = document.getElementById('cameraControl');
 
 let lastLookX = 0;
@@ -447,12 +453,11 @@ cameraControlZone.addEventListener('touchmove', e => {
             const deltaX = touch.clientX - lastLookX;
             const deltaY = touch.clientY - lastLookY;
 
-            // YAW: rotates the player mesh, so "forward" follows the view
+            // YAW: rotates player body (Y-axis), so arms and body turn
             look.yaw -= deltaX * look.sensitivity;
 
-            // PITCH: camera-only, clamped so the view can't flip
-            const pitchDelta = deltaY * look.sensitivity;
-            look.pitch += look.invertPitch ? pitchDelta : -pitchDelta;
+            // PITCH: camera X-axis only, look up/down
+            look.pitch -= deltaY * look.sensitivity;
             look.pitch = Math.max(look.minPitch, Math.min(look.maxPitch, look.pitch));
 
             lastLookX = touch.clientX;
@@ -523,8 +528,6 @@ function startRoll() {
     physics.isRolling = true;
     physics.rollTimer = 0;
 
-    // Dash along the view forward vector, not the mesh rotation,
-    // so the roll always goes where the player is looking.
     getForwardVector(forwardVec);
     physics.rollDirX = forwardVec.x;
     physics.rollDirZ = forwardVec.z;
@@ -574,9 +577,9 @@ btnReload.addEventListener('touchstart', e => {
 function updatePlayer(deltaTime) {
     if (!isPlayerLoaded) return;
 
-    // Mesh always faces where we're looking. Mesh forward is +Z, camera
-    // forward is -Z, hence the PI correction.
-    player.rotation.y = look.yaw + Math.PI + MODEL_YAW_OFFSET;
+    // Player body rotates with yaw (horizontal look)
+    // Camera looks down -Z, player mesh forward is +Z, hence the PI correction
+    player.rotation.y = look.yaw + Math.PI;
 
     // --- Roll dash ---
     if (physics.isRolling) {
@@ -595,7 +598,7 @@ function updatePlayer(deltaTime) {
         }
     }
 
-    // --- Gravity / jump arc ---
+    // --- Gravity / jump ---
     if (!physics.isGrounded || player.position.y > physics.groundLevel) {
         physics.yVelocity += physics.gravity;
         player.position.y += physics.yVelocity;
@@ -608,7 +611,7 @@ function updatePlayer(deltaTime) {
         }
     }
 
-    // --- Horizontal movement, relative to facing ---
+    // --- Horizontal movement ---
     if (!physics.isRolling &&
         (Math.abs(movement.forward) > 0.01 || Math.abs(movement.right) > 0.01)) {
 
@@ -631,19 +634,14 @@ function updatePlayer(deltaTime) {
 function updateCamera() {
     if (!isPlayerLoaded) return;
 
-    getForwardVector(forwardVec);
-
-    // Lock to the player's X/Z at eye level, nudged forward along the
-    // view axis so we sit outside the head mesh instead of inside it.
+    // Lock camera to player X/Z at neck/shoulder height
     camera.position.set(
-        player.position.x + forwardVec.x * fpsView.forwardOffset,
-        player.position.y + fpsView.eyeHeight,
-        player.position.z + forwardVec.z * fpsView.forwardOffset
+        player.position.x,
+        player.position.y + fpsView.cameraHeight,
+        player.position.z
     );
 
-    // Direct Euler assignment instead of lookAt: lookAt degenerates when
-    // the target is straight up or down, which is exactly where the pitch
-    // clamp lets us go.
+    // Direct Euler assignment: yaw from player body, pitch camera-only
     camera.rotation.y = look.yaw;
     camera.rotation.x = look.pitch;
     camera.rotation.z = 0;
