@@ -1,16 +1,16 @@
 // ============================================
-// OPEN WORLD 3D ENGINE - FIRST-PERSON (BODY VISIBLE)
-// Three.js, GLTF character with head hidden,
-// gun stance, roll/jump split, shooting states
+// OPEN WORLD 3D ENGINE - FIRST-PERSON CITY
+// Three.js, GLTF character, procedural city grid,
+// buildings, trees, NPC pedestrians with collision
 // ============================================
 
-console.log('Initializing Open World Engine (FPS)...');
+console.log('Initializing Open World Engine (FPS City)...');
 console.log('THREE.js version:', THREE.REVISION);
 
 // --- SCENE SETUP ---
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
-scene.fog = new THREE.Fog(0x87ceeb, 50, 300);
+scene.fog = new THREE.Fog(0x87ceeb, 80, 200);
 
 // --- PERSPECTIVE CAMERA ---
 const camera = new THREE.PerspectiveCamera(
@@ -20,7 +20,6 @@ const camera = new THREE.PerspectiveCamera(
     1000
 );
 
-// YXZ order: yaw applied first, then pitch relative to yawed frame
 camera.rotation.order = 'YXZ';
 
 // --- RENDERER ---
@@ -43,67 +42,397 @@ window.addEventListener('resize', () => {
 });
 
 // --- LIGHTING ---
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
 scene.add(ambientLight);
 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-directionalLight.position.set(50, 100, 50);
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+directionalLight.position.set(100, 150, 80);
 directionalLight.castShadow = true;
-directionalLight.shadow.camera.left = -100;
-directionalLight.shadow.camera.right = 100;
-directionalLight.shadow.camera.top = 100;
-directionalLight.shadow.camera.bottom = -100;
+directionalLight.shadow.camera.left = -150;
+directionalLight.shadow.camera.right = 150;
+directionalLight.shadow.camera.top = 150;
+directionalLight.shadow.camera.bottom = -150;
 directionalLight.shadow.camera.near = 0.5;
-directionalLight.shadow.camera.far = 200;
+directionalLight.shadow.camera.far = 300;
 directionalLight.shadow.mapSize.width = 2048;
 directionalLight.shadow.mapSize.height = 2048;
 scene.add(directionalLight);
 
-// --- GROUND PLANE ---
-const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(500, 500),
-    new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.9, metalness: 0.1 })
-);
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
+// ============================================
+// CITY GENERATION
+// ============================================
 
-// --- CITY BUILDINGS ---
+const cityConfig = {
+    blockSize: 30,      // width/depth of one city block
+    roadWidth: 8,       // street width
+    gridSize: 5,        // 5x5 grid of blocks
+    sidewalkWidth: 2
+};
+
+const collisionObjects = [];  // buildings, trees, NPCs for collision checks
+
+// --- GROUND BASE ---
+const groundSize = cityConfig.gridSize * (cityConfig.blockSize + cityConfig.roadWidth) + 50;
+const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize);
+const groundMat = new THREE.MeshStandardMaterial({ 
+    color: 0x2a2a2a, 
+    roughness: 0.95 
+});
+const groundPlane = new THREE.Mesh(groundGeo, groundMat);
+groundPlane.rotation.x = -Math.PI / 2;
+groundPlane.receiveShadow = true;
+scene.add(groundPlane);
+
+console.log('Ground plane created');
+
+// --- ROADS (ASPHALT) ---
+function createRoad(x, z, width, depth) {
+    const road = new THREE.Mesh(
+        new THREE.BoxGeometry(width, 0.1, depth),
+        new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.9 })
+    );
+    road.position.set(x, 0.05, z);
+    road.receiveShadow = true;
+    scene.add(road);
+}
+
+// Horizontal roads
+for (let row = 0; row <= cityConfig.gridSize; row++) {
+    const z = row * (cityConfig.blockSize + cityConfig.roadWidth) - groundSize / 2 + cityConfig.roadWidth / 2;
+    createRoad(0, z, groundSize, cityConfig.roadWidth);
+}
+
+// Vertical roads
+for (let col = 0; col <= cityConfig.gridSize; col++) {
+    const x = col * (cityConfig.blockSize + cityConfig.roadWidth) - groundSize / 2 + cityConfig.roadWidth / 2;
+    createRoad(x, 0, cityConfig.roadWidth, groundSize);
+}
+
+console.log('City roads created');
+
+// --- SIDEWALK CURBS ---
+function createSidewalk(x, z, width, depth) {
+    const curb = new THREE.Mesh(
+        new THREE.BoxGeometry(width, 0.3, depth),
+        new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.8 })
+    );
+    curb.position.set(x, 0.15, z);
+    curb.receiveShadow = true;
+    scene.add(curb);
+}
+
+for (let row = 0; row < cityConfig.gridSize; row++) {
+    for (let col = 0; col < cityConfig.gridSize; col++) {
+        const blockX = col * (cityConfig.blockSize + cityConfig.roadWidth) - groundSize / 2 + cityConfig.roadWidth + cityConfig.blockSize / 2;
+        const blockZ = row * (cityConfig.blockSize + cityConfig.roadWidth) - groundSize / 2 + cityConfig.roadWidth + cityConfig.blockSize / 2;
+
+        // Top sidewalk
+        createSidewalk(blockX, blockZ - cityConfig.blockSize / 2 - cityConfig.sidewalkWidth / 2, cityConfig.blockSize, cityConfig.sidewalkWidth);
+        // Bottom sidewalk
+        createSidewalk(blockX, blockZ + cityConfig.blockSize / 2 + cityConfig.sidewalkWidth / 2, cityConfig.blockSize, cityConfig.sidewalkWidth);
+        // Left sidewalk
+        createSidewalk(blockX - cityConfig.blockSize / 2 - cityConfig.sidewalkWidth / 2, blockZ, cityConfig.sidewalkWidth, cityConfig.blockSize);
+        // Right sidewalk
+        createSidewalk(blockX + cityConfig.blockSize / 2 + cityConfig.sidewalkWidth / 2, blockZ, cityConfig.sidewalkWidth, cityConfig.blockSize);
+    }
+}
+
+console.log('Sidewalks created');
+
+// --- PROCEDURAL BUILDINGS ---
 const buildingColors = [
-    0xff6b6b, 0x4ecdc4, 0xffe66d, 0x95e1d3,
-    0xf38181, 0xaa96da, 0xfcbad3, 0xa8e6cf,
-    0xdcedc1, 0xffd3b6, 0xffaaa5, 0xff8b94
+    0xff6b6b, 0x4ecdc4, 0xffe66d, 0x95e1d3, 0xf38181, 
+    0xaa96da, 0xfcbad3, 0xa8e6cf, 0xdcedc1, 0xffd3b6, 
+    0xffaaa5, 0xff8b94, 0xc7ceea, 0xffc8dd
 ];
 
 function createBuilding(x, z, width, height, depth, color) {
     const building = new THREE.Mesh(
         new THREE.BoxGeometry(width, height, depth),
-        new THREE.MeshStandardMaterial({ color: color, roughness: 0.7, metalness: 0.2 })
+        new THREE.MeshStandardMaterial({ 
+            color: color, 
+            roughness: 0.75, 
+            metalness: 0.2 
+        })
     );
     building.position.set(x, height / 2, z);
     building.castShadow = true;
     building.receiveShadow = true;
+    scene.add(building);
+
+    // Store collision bounds
+    collisionObjects.push({
+        type: 'box',
+        x: x,
+        z: z,
+        width: width,
+        depth: depth,
+        height: height
+    });
+
     return building;
 }
 
-const buildings = [
-    createBuilding(-40, -40, 15, 25, 15, buildingColors[0]),
-    createBuilding(-40, -10, 12, 30, 12, buildingColors[1]),
-    createBuilding(-40, 20, 18, 20, 14, buildingColors[2]),
-    createBuilding(-40, 50, 10, 35, 10, buildingColors[3]),
-    createBuilding(40, -40, 20, 22, 20, buildingColors[4]),
-    createBuilding(40, -10, 14, 28, 16, buildingColors[5]),
-    createBuilding(40, 20, 16, 32, 12, buildingColors[6]),
-    createBuilding(40, 50, 12, 18, 14, buildingColors[7]),
-    createBuilding(0, 60, 25, 40, 25, buildingColors[8]),
-    createBuilding(-20, 80, 15, 24, 15, buildingColors[9]),
-    createBuilding(20, 80, 18, 28, 18, buildingColors[10]),
-    createBuilding(0, -60, 30, 35, 20, buildingColors[11])
-];
+// Generate buildings in each block
+for (let row = 0; row < cityConfig.gridSize; row++) {
+    for (let col = 0; col < cityConfig.gridSize; col++) {
+        const blockX = col * (cityConfig.blockSize + cityConfig.roadWidth) - groundSize / 2 + cityConfig.roadWidth + cityConfig.blockSize / 2;
+        const blockZ = row * (cityConfig.blockSize + cityConfig.roadWidth) - groundSize / 2 + cityConfig.roadWidth + cityConfig.blockSize / 2;
 
-buildings.forEach(b => scene.add(b));
+        // Skip some blocks randomly to create variation
+        if (Math.random() < 0.15) continue;
 
-// --- PLAYER CONTAINER ---
+        // Place 1-3 buildings per block
+        const numBuildings = Math.floor(Math.random() * 2) + 1;
+        
+        for (let i = 0; i < numBuildings; i++) {
+            const bWidth = 8 + Math.random() * 10;
+            const bHeight = 15 + Math.random() * 30;
+            const bDepth = 8 + Math.random() * 10;
+            
+            const offsetX = (Math.random() - 0.5) * (cityConfig.blockSize - bWidth - 4);
+            const offsetZ = (Math.random() - 0.5) * (cityConfig.blockSize - bDepth - 4);
+            
+            const color = buildingColors[Math.floor(Math.random() * buildingColors.length)];
+            
+            createBuilding(
+                blockX + offsetX,
+                blockZ + offsetZ,
+                bWidth,
+                bHeight,
+                bDepth,
+                color
+            );
+        }
+    }
+}
+
+console.log('Buildings generated:', collisionObjects.length);
+
+// --- LOW-POLY TREES ---
+function createTree(x, z) {
+    const tree = new THREE.Group();
+
+    // Trunk
+    const trunkGeo = new THREE.CylinderGeometry(0.3, 0.4, 4, 6);
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.9 });
+    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+    trunk.position.y = 2;
+    trunk.castShadow = true;
+    tree.add(trunk);
+
+    // Leaves (cone)
+    const leavesGeo = new THREE.ConeGeometry(2, 5, 6);
+    const leavesMat = new THREE.MeshStandardMaterial({ color: 0x228B22, roughness: 0.8 });
+    const leaves = new THREE.Mesh(leavesGeo, leavesMat);
+    leaves.position.y = 5.5;
+    leaves.castShadow = true;
+    tree.add(leaves);
+
+    tree.position.set(x, 0, z);
+    scene.add(tree);
+
+    // Collision
+    collisionObjects.push({
+        type: 'cylinder',
+        x: x,
+        z: z,
+        radius: 0.8
+    });
+
+    return tree;
+}
+
+// Scatter trees around sidewalks
+for (let i = 0; i < 40; i++) {
+    const row = Math.floor(Math.random() * cityConfig.gridSize);
+    const col = Math.floor(Math.random() * cityConfig.gridSize);
+    
+    const blockX = col * (cityConfig.blockSize + cityConfig.roadWidth) - groundSize / 2 + cityConfig.roadWidth + cityConfig.blockSize / 2;
+    const blockZ = row * (cityConfig.blockSize + cityConfig.roadWidth) - groundSize / 2 + cityConfig.roadWidth + cityConfig.blockSize / 2;
+
+    const side = Math.floor(Math.random() * 4);
+    let treeX, treeZ;
+
+    switch(side) {
+        case 0: // top
+            treeX = blockX + (Math.random() - 0.5) * cityConfig.blockSize * 0.8;
+            treeZ = blockZ - cityConfig.blockSize / 2 - 2;
+            break;
+        case 1: // bottom
+            treeX = blockX + (Math.random() - 0.5) * cityConfig.blockSize * 0.8;
+            treeZ = blockZ + cityConfig.blockSize / 2 + 2;
+            break;
+        case 2: // left
+            treeX = blockX - cityConfig.blockSize / 2 - 2;
+            treeZ = blockZ + (Math.random() - 0.5) * cityConfig.blockSize * 0.8;
+            break;
+        case 3: // right
+            treeX = blockX + cityConfig.blockSize / 2 + 2;
+            treeZ = blockZ + (Math.random() - 0.5) * cityConfig.blockSize * 0.8;
+            break;
+    }
+
+    createTree(treeX, treeZ);
+}
+
+console.log('Trees scattered');
+
+// --- SIMPLE NPCs (PEDESTRIANS) ---
+const npcs = [];
+
+function createNPC(x, z) {
+    const npc = new THREE.Group();
+
+    // Body
+    const bodyGeo = new THREE.BoxGeometry(0.6, 1.2, 0.4);
+    const bodyMat = new THREE.MeshStandardMaterial({ 
+        color: Math.random() * 0xffffff,
+        roughness: 0.7 
+    });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 0.9;
+    body.castShadow = true;
+    npc.add(body);
+
+    // Head
+    const headGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+    const headMat = new THREE.MeshStandardMaterial({ 
+        color: 0xf5deb3,
+        roughness: 0.6 
+    });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = 1.7;
+    head.castShadow = true;
+    npc.add(head);
+
+    // Legs
+    const legGeo = new THREE.BoxGeometry(0.2, 0.6, 0.2);
+    const legMat = new THREE.MeshStandardMaterial({ 
+        color: 0x2c3e50,
+        roughness: 0.8 
+    });
+
+    const leftLeg = new THREE.Mesh(legGeo, legMat);
+    leftLeg.position.set(-0.15, 0.3, 0);
+    leftLeg.castShadow = true;
+    npc.add(leftLeg);
+
+    const rightLeg = new THREE.Mesh(legGeo, legMat);
+    rightLeg.position.set(0.15, 0.3, 0);
+    rightLeg.castShadow = true;
+    npc.add(rightLeg);
+
+    npc.position.set(x, 0, z);
+    scene.add(npc);
+
+    // NPC AI state
+    const npcData = {
+        mesh: npc,
+        x: x,
+        z: z,
+        speed: 0.02 + Math.random() * 0.02,
+        direction: Math.random() * Math.PI * 2,
+        turnTimer: 0,
+        turnInterval: 3 + Math.random() * 4,
+        radius: 0.5
+    };
+
+    npcs.push(npcData);
+    
+    // Add to collision
+    collisionObjects.push({
+        type: 'npc',
+        data: npcData
+    });
+
+    return npc;
+}
+
+// Spawn NPCs on sidewalks
+for (let i = 0; i < 10; i++) {
+    const row = Math.floor(Math.random() * cityConfig.gridSize);
+    const col = Math.floor(Math.random() * cityConfig.gridSize);
+    
+    const blockX = col * (cityConfig.blockSize + cityConfig.roadWidth) - groundSize / 2 + cityConfig.roadWidth + cityConfig.blockSize / 2;
+    const blockZ = row * (cityConfig.blockSize + cityConfig.roadWidth) - groundSize / 2 + cityConfig.roadWidth + cityConfig.blockSize / 2;
+
+    const side = Math.floor(Math.random() * 4);
+    let npcX, npcZ;
+
+    switch(side) {
+        case 0:
+            npcX = blockX + (Math.random() - 0.5) * cityConfig.blockSize * 0.7;
+            npcZ = blockZ - cityConfig.blockSize / 2 - 1;
+            break;
+        case 1:
+            npcX = blockX + (Math.random() - 0.5) * cityConfig.blockSize * 0.7;
+            npcZ = blockZ + cityConfig.blockSize / 2 + 1;
+            break;
+        case 2:
+            npcX = blockX - cityConfig.blockSize / 2 - 1;
+            npcZ = blockZ + (Math.random() - 0.5) * cityConfig.blockSize * 0.7;
+            break;
+        case 3:
+            npcX = blockX + cityConfig.blockSize / 2 + 1;
+            npcZ = blockZ + (Math.random() - 0.5) * cityConfig.blockSize * 0.7;
+            break;
+    }
+
+    createNPC(npcX, npcZ);
+}
+
+console.log('NPCs spawned:', npcs.length);
+
+// ============================================
+// COLLISION DETECTION
+// ============================================
+
+function checkCollision(x, z, radius) {
+    for (let obj of collisionObjects) {
+        if (obj.type === 'box') {
+            // AABB collision with buildings
+            const halfW = obj.width / 2;
+            const halfD = obj.depth / 2;
+            
+            const closestX = Math.max(obj.x - halfW, Math.min(x, obj.x + halfW));
+            const closestZ = Math.max(obj.z - halfD, Math.min(z, obj.z + halfD));
+            
+            const dx = x - closestX;
+            const dz = z - closestZ;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            
+            if (dist < radius) {
+                return { collision: true, nx: dx / dist, nz: dz / dist };
+            }
+        } else if (obj.type === 'cylinder') {
+            // Circle collision with trees
+            const dx = x - obj.x;
+            const dz = z - obj.z;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            
+            if (dist < radius + obj.radius) {
+                return { collision: true, nx: dx / dist, nz: dz / dist };
+            }
+        } else if (obj.type === 'npc') {
+            // Circle collision with NPCs
+            const npc = obj.data;
+            const dx = x - npc.x;
+            const dz = z - npc.z;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            
+            if (dist < radius + npc.radius) {
+                return { collision: true, nx: dx / dist, nz: dz / dist };
+            }
+        }
+    }
+    return { collision: false };
+}
+
+// ============================================
+// PLAYER
+// ============================================
+
 const player = new THREE.Group();
 player.position.set(0, 0, 0);
 scene.add(player);
@@ -123,39 +452,31 @@ const clips = {
 
 let currentAction = null;
 
-// ============================================
-// FIRST-PERSON VIEW STATE
-// ============================================
-
 const look = {
-    yaw: 0,                       // horizontal facing (player body rotation)
-    pitch: 0,                     // vertical look (camera only)
-    minPitch: -Math.PI / 2,       // straight down
-    maxPitch: Math.PI / 2,        // straight up
+    yaw: 0,
+    pitch: 0,
+    minPitch: -Math.PI / 2,
+    maxPitch: Math.PI / 2,
     sensitivity: 0.004
 };
 
 const fpsView = {
-    cameraHeight: 1.55            // neck/shoulder height above player origin
+    cameraHeight: 1.55
 };
 
-// Reused vectors
 const forwardVec = new THREE.Vector3();
 const rightVec = new THREE.Vector3();
 
-// Camera looks down -Z, so forward is (-sin yaw, 0, -cos yaw)
 function getForwardVector(target) {
     target.set(-Math.sin(look.yaw), 0, -Math.cos(look.yaw));
     return target;
 }
 
-// Right = forward × up
 function getRightVector(target) {
     target.set(Math.cos(look.yaw), 0, -Math.sin(look.yaw));
     return target;
 }
 
-// --- PLAYER PHYSICS ---
 const physics = {
     yVelocity: 0,
     gravity: -0.025,
@@ -170,7 +491,6 @@ const physics = {
     rollDirZ: 0
 };
 
-// --- MOVEMENT STATE ---
 const movement = {
     forward: 0,
     right: 0,
@@ -180,10 +500,6 @@ const movement = {
     isRunning: false,
     isFiring: false
 };
-
-// ============================================
-// ANIMATION SYSTEM
-// ============================================
 
 const CLIP_NAMES = {
     idleGun: 'Idle_Gun',
@@ -206,9 +522,6 @@ function setupAnimations(gltf) {
         const clip = byName[CLIP_NAMES[key]];
         if (clip) {
             clips[key] = mixer.clipAction(clip);
-            console.log('Mapped', key, '->', CLIP_NAMES[key]);
-        } else {
-            console.warn('Missing clip:', CLIP_NAMES[key]);
         }
     });
 
@@ -275,10 +588,6 @@ function updateAnimationState() {
     }
 }
 
-// ============================================
-// MODEL LOADING & HEAD HIDING
-// ============================================
-
 const loader = new THREE.GLTFLoader();
 
 loader.load(
@@ -286,15 +595,12 @@ loader.load(
     function (gltf) {
         playerModel = gltf.scene;
 
-        // Hide the head mesh to prevent first-person clipping
-        // Common head mesh names: "Head", "head", "HEAD", "mixamorigHead", etc.
         const headKeywords = ['head'];
 
         playerModel.traverse(child => {
             if (child.isMesh) {
                 const nameLower = child.name.toLowerCase();
 
-                // Check if this mesh is the head
                 let isHead = false;
                 for (let keyword of headKeywords) {
                     if (nameLower.includes(keyword)) {
@@ -311,7 +617,6 @@ loader.load(
                     child.receiveShadow = true;
                 }
 
-                // Prevent culling when camera is inside body bounds
                 child.frustumCulled = false;
             }
         });
@@ -321,18 +626,12 @@ loader.load(
 
         if (gltf.animations && gltf.animations.length > 0) {
             setupAnimations(gltf);
-        } else {
-            console.warn('No animations in model');
         }
 
         isPlayerLoaded = true;
-        console.log('Player ready (FPS mode with body visible)');
+        console.log('Player ready');
     },
-    function (xhr) {
-        if (xhr.total) {
-            console.log('Loading:', Math.round((xhr.loaded / xhr.total) * 100) + '%');
-        }
-    },
+    undefined,
     function (error) {
         console.error('Error loading Mainmc1.glb:', error);
     }
@@ -347,7 +646,6 @@ const touches = {
     camera: null
 };
 
-// --- JOYSTICK (LEFT) ---
 const joystick = document.getElementById('joystick');
 const joystickStick = document.getElementById('joystickStick');
 
@@ -431,7 +729,6 @@ function endJoystickTouch(e) {
 joystick.addEventListener('touchend', endJoystickTouch, { passive: false });
 joystick.addEventListener('touchcancel', endJoystickTouch, { passive: false });
 
-// --- FPS LOOK (RIGHT SIDE DRAG) ---
 const cameraControlZone = document.getElementById('cameraControl');
 
 let lastLookX = 0;
@@ -453,10 +750,7 @@ cameraControlZone.addEventListener('touchmove', e => {
             const deltaX = touch.clientX - lastLookX;
             const deltaY = touch.clientY - lastLookY;
 
-            // YAW: rotates player body (Y-axis), so arms and body turn
             look.yaw -= deltaX * look.sensitivity;
-
-            // PITCH: camera X-axis only, look up/down
             look.pitch -= deltaY * look.sensitivity;
             look.pitch = Math.max(look.minPitch, Math.min(look.maxPitch, look.pitch));
 
@@ -489,7 +783,6 @@ const btnJump = document.getElementById('btnJump');
 const btnFire = document.getElementById('btnFire');
 const btnReload = document.getElementById('btnReload');
 
-// --- RUN (hold) ---
 btnRun.addEventListener('touchstart', e => {
     e.preventDefault();
     e.stopPropagation();
@@ -509,7 +802,6 @@ function releaseRun(e) {
 btnRun.addEventListener('touchend', releaseRun, { passive: false });
 btnRun.addEventListener('touchcancel', releaseRun, { passive: false });
 
-// --- JUMP / ROLL ---
 btnJump.addEventListener('touchstart', e => {
     e.preventDefault();
     e.stopPropagation();
@@ -543,7 +835,6 @@ function startRoll() {
     currentAction = clips.roll;
 }
 
-// --- FIRE (hold) ---
 btnFire.addEventListener('touchstart', e => {
     e.preventDefault();
     e.stopPropagation();
@@ -563,7 +854,6 @@ function releaseFire(e) {
 btnFire.addEventListener('touchend', releaseFire, { passive: false });
 btnFire.addEventListener('touchcancel', releaseFire, { passive: false });
 
-// --- RELOAD (placeholder) ---
 btnReload.addEventListener('touchstart', e => {
     e.preventDefault();
     e.stopPropagation();
@@ -574,22 +864,52 @@ btnReload.addEventListener('touchstart', e => {
 // UPDATE
 // ============================================
 
+function updateNPCs(deltaTime) {
+    npcs.forEach(npc => {
+        npc.turnTimer += deltaTime;
+
+        if (npc.turnTimer >= npc.turnInterval) {
+            npc.direction += (Math.random() - 0.5) * Math.PI;
+            npc.turnTimer = 0;
+        }
+
+        const moveX = Math.cos(npc.direction) * npc.speed;
+        const moveZ = Math.sin(npc.direction) * npc.speed;
+
+        const newX = npc.x + moveX;
+        const newZ = npc.z + moveZ;
+
+        // Simple boundary check to keep NPCs in city
+        if (Math.abs(newX) < groundSize / 2 - 10 && Math.abs(newZ) < groundSize / 2 - 10) {
+            npc.x = newX;
+            npc.z = newZ;
+            npc.mesh.position.set(npc.x, 0, npc.z);
+            npc.mesh.rotation.y = npc.direction;
+        } else {
+            npc.direction += Math.PI;
+        }
+    });
+}
+
 function updatePlayer(deltaTime) {
     if (!isPlayerLoaded) return;
 
-    // Player body rotates with yaw (horizontal look)
-    // Camera looks down -Z, player mesh forward is +Z, hence the PI correction
     player.rotation.y = look.yaw + Math.PI;
 
-    // --- Roll dash ---
     if (physics.isRolling) {
         physics.rollTimer += deltaTime;
 
         const progress = Math.min(physics.rollTimer / physics.rollDuration, 1);
         const dash = physics.rollBoost * (1 - progress);
 
-        player.position.x += physics.rollDirX * dash;
-        player.position.z += physics.rollDirZ * dash;
+        const newX = player.position.x + physics.rollDirX * dash;
+        const newZ = player.position.z + physics.rollDirZ * dash;
+
+        const collision = checkCollision(newX, newZ, 0.5);
+        if (!collision.collision) {
+            player.position.x = newX;
+            player.position.z = newZ;
+        }
 
         if (physics.rollTimer >= physics.rollDuration) {
             physics.isRolling = false;
@@ -598,7 +918,6 @@ function updatePlayer(deltaTime) {
         }
     }
 
-    // --- Gravity / jump ---
     if (!physics.isGrounded || player.position.y > physics.groundLevel) {
         physics.yVelocity += physics.gravity;
         player.position.y += physics.yVelocity;
@@ -611,7 +930,6 @@ function updatePlayer(deltaTime) {
         }
     }
 
-    // --- Horizontal movement ---
     if (!physics.isRolling &&
         (Math.abs(movement.forward) > 0.01 || Math.abs(movement.right) > 0.01)) {
 
@@ -620,10 +938,28 @@ function updatePlayer(deltaTime) {
 
         const speed = movement.isRunning ? movement.runSpeed : movement.walkSpeed;
 
-        player.position.x +=
-            (forwardVec.x * movement.forward + rightVec.x * movement.right) * speed;
-        player.position.z +=
-            (forwardVec.z * movement.forward + rightVec.z * movement.right) * speed;
+        const moveX = (forwardVec.x * movement.forward + rightVec.x * movement.right) * speed;
+        const moveZ = (forwardVec.z * movement.forward + rightVec.z * movement.right) * speed;
+
+        const newX = player.position.x + moveX;
+        const newZ = player.position.z + moveZ;
+
+        const collision = checkCollision(newX, newZ, 0.5);
+
+        if (!collision.collision) {
+            player.position.x = newX;
+            player.position.z = newZ;
+        } else {
+            // Slide along wall
+            const slideX = player.position.x + moveX * (1 - Math.abs(collision.nx));
+            const slideZ = player.position.z + moveZ * (1 - Math.abs(collision.nz));
+            
+            const slideCheck = checkCollision(slideX, slideZ, 0.5);
+            if (!slideCheck.collision) {
+                player.position.x = slideX;
+                player.position.z = slideZ;
+            }
+        }
     }
 
     if (mixer) {
@@ -634,14 +970,12 @@ function updatePlayer(deltaTime) {
 function updateCamera() {
     if (!isPlayerLoaded) return;
 
-    // Lock camera to player X/Z at neck/shoulder height
     camera.position.set(
         player.position.x,
         player.position.y + fpsView.cameraHeight,
         player.position.z
     );
 
-    // Direct Euler assignment: yaw from player body, pitch camera-only
     camera.rotation.y = look.yaw;
     camera.rotation.x = look.pitch;
     camera.rotation.z = 0;
@@ -656,6 +990,7 @@ const clock = new THREE.Clock();
 function animate() {
     requestAnimationFrame(animate);
     const deltaTime = clock.getDelta();
+    updateNPCs(deltaTime);
     updatePlayer(deltaTime);
     updateCamera();
     renderer.render(scene, camera);
